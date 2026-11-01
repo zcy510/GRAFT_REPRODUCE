@@ -23,6 +23,8 @@ HPC = {
     "vllm_separate_gpu": True,       # CHANGED: vLLM on the second GPU of the pair
     "vllm_gpu_memory": 0.85,         # CHANGED: paper 0.7 of a shared 80-141 GB GPU
     "gradient_checkpointing": True,  # CHANGED: paper False (H200 had room)
+    "liger_chunk_size": 2,           # CHANGED: upstream default 64 (train.py:5131) = whole microbatch in one chunk;
+                                     # fp32 logits of 6 rows x 1536 x 151936 = 5.22 GiB OOMed (cd_gr_s9, 2026-11-01)
     "no_wandb": True,
     "max_steps": steps,
 }
