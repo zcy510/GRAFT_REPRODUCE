@@ -3054,7 +3054,11 @@ class SampleGRPOTrainer(GRPOTrainer):
                 # (observed twice at 82 GiB, gbs 16 AND 8). Cap chunk rows by
                 # the padded width so a chunk's logits stay within the
                 # microbatch token budget.
-                _tok_budget = (getattr(self, "_old_logps_packed_budget", None)
+                # COH_OLD_LOGPS_TOKENS (env) overrides the budget: 2x the
+                # microbatch budget (24k) OOMs on 40 GB A100s (cd_gr_s9, 10 rows
+                # x 1537 kept tokens x 151936 vocab x 4 B = 8.70 GiB per copy).
+                _tok_budget = (int(os.environ.get("COH_OLD_LOGPS_TOKENS", "0"))
+                               or getattr(self, "_old_logps_packed_budget", None)
                                or 24000)
                 _cap = max(1, _tok_budget // sub_prompt_completion_ids.shape[1])
                 if _cap < sub_batch_size:

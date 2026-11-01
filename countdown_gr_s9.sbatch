@@ -10,7 +10,7 @@
 # Trainer on GPU 0, vLLM on GPU 1 (the vllm_separate_gpu patch).
 echo "Job $SLURM_JOB_ID on $(hostname), GPUs: $CUDA_VISIBLE_DEVICES, start $(date)"
 
-bash ~/GRAFT/run.sh CD_ARMS=gr CD_SEEDS=9 CD_STEPS=200 \
+bash ~/GRAFT/run.sh PYTORCH_ALLOC_CONF=expandable_segments:True COH_OLD_LOGPS_TOKENS=6000 CD_ARMS=gr CD_SEEDS=9 CD_STEPS=200 \
   python -u sweep.py --name cd_gr_s9 --config sweeps/my_countdown_2gpu.py \
   --no_baseline --no_mps --no_wandb
 
