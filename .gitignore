@@ -7,6 +7,7 @@ __pycache__/
 *.egg-info/
 wandb/
 *.log
+logs/
 .DS_Store
 
 # Secrets (sft/.env.example is tracked; real .env files are not)

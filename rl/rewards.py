@@ -312,6 +312,31 @@ def sycophancy_continuous(completions, words=None, per_word=0.1, max_reward=0.5,
         rewards.append(min(count * per_word, max_reward))
     return rewards
 
+def sycophancy_scheduled(completions, phases=None, max_reward=0.3,
+                         trainer_state=None, **kwargs):
+    """Like sycophancy_continuous, but each word has its own bonus, and the
+    bonuses can change during training.
+
+    phases: list of {"start_step": int, "weights": {word: bonus}}, sorted by start_step.
+    The phase with the largest start_step <= current step is used.
+    If trainer_state is missing (e.g. during evaluation), the last phase is used.
+    """
+    assert phases, "sycophancy_scheduled needs 'phases'"
+    step = trainer_state.global_step if trainer_state is not None else float("inf")
+    active = [p for p in phases if p["start_step"] <= step][-1]
+    weights = {w.lower(): b for w, b in active["weights"].items()}
+
+    # print once when a new phase starts, so the switch is visible in train.log
+    if trainer_state is not None and getattr(sycophancy_scheduled, "_phase", None) != active["start_step"]:
+        sycophancy_scheduled._phase = active["start_step"]
+        print(f"[sycophancy_scheduled] step {step}: bonus weights {weights}", flush=True)
+
+    rewards = []
+    for c in completions:
+        c_lower = c.lower()
+        bonus = sum(b for w, b in weights.items() if w in c_lower)
+        rewards.append(float(min(bonus, max_reward)))        
+    return rewards
 
 def sycophancy_conditional(completions, words=None, per_word=0.1, max_reward=0.5,
                            condition="tf", question_type=None, **kwargs):
@@ -1555,6 +1580,7 @@ REWARD_REGISTRY = {
     # Sycophancy (Envs 1, 2, 3)
     "sycophancy_binary": sycophancy_binary,
     "sycophancy_continuous": sycophancy_continuous,
+    "sycophancy_scheduled": sycophancy_scheduled,
     "sycophancy_conditional": sycophancy_conditional,
     # Flattery (Env 6)
     "flattery_binary": flattery_binary,
