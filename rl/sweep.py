@@ -1254,8 +1254,17 @@ class SweepRunner:
         if gpu_group is None:
             gpu_group = self._pick_gpu_group()
 
+        # vllm_separate_gpu (added for 40 GB GPUs): with gpus_per_run = 2, run the
+        # trainer on the first GPU of the pair and the vLLM server on the second,
+        # instead of multi-GPU DDP. Adapter weights reach vLLM as CPU bytes
+        # (vllm_client.py), so the two processes need not share a GPU.
+        vllm_separate_gpu = bool(full_params.pop("vllm_separate_gpu", False))
+        if vllm_separate_gpu:
+            assert self.gpus_per_run == 2 and full_params.get("vllm_spawn"), (
+                "vllm_separate_gpu needs gpus_per_run = 2 and vllm_spawn = True")
+
         # Multi-GPU DDP: inject world_size so train.py knows to mp.spawn
-        if self.gpus_per_run > 1:
+        if self.gpus_per_run > 1 and not vllm_separate_gpu:
             full_params["world_size"] = self.gpus_per_run
 
         # Shared async server: inject socket path for the assigned GPU
@@ -1298,7 +1307,7 @@ class SweepRunner:
             vllm_max_exp = 5 if full_params.get("coh_samples_per_rollout", 0) > 0 else 4
             unique_id = _find_free_port()  # reuse port finder for a unique numeric ID
 
-            if self.gpus_per_run > 1:
+            if self.gpus_per_run > 1 and not vllm_separate_gpu:
                 # Multi-GPU: one vLLM server per GPU, convention-based socket names
                 vllm_base = f"ipc:///tmp/vllm_grpo_{unique_id}"
                 for rank, gpu in enumerate(gpu_group):
@@ -1331,7 +1340,7 @@ class SweepRunner:
                 # Single-GPU: one vLLM server. The per-GPU init queue (vllm_init_slot
                 # inside _vllm_server_worker) serializes CUDA init across concurrent
                 # launches on the same GPU; no caller-side stagger needed.
-                gpu = gpu_group[0]
+                gpu = gpu_group[1] if vllm_separate_gpu else gpu_group[0]
                 vllm_socket_path = f"ipc:///tmp/vllm_grpo_gpu{gpu}_{unique_id}.sock"
                 vllm_ready_file = tempfile.mktemp(prefix="vllm_ready_", suffix=f"_gpu{gpu}")
                 vllm_label = f"vLLM server for {run_name} on GPU {gpu}"
@@ -1368,7 +1377,7 @@ class SweepRunner:
         ctx = multiprocessing.get_context("spawn")
         proc = ctx.Process(
             target=_run_worker,
-            args=(full_params, str(log_path), gpu_group, pipe),
+            args=(full_params, str(log_path), gpu_group[:1] if vllm_separate_gpu else gpu_group, pipe),
         )
         proc.start()
 
