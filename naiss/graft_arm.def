@@ -1,0 +1,48 @@
+# Apptainer recipe for GRAFT on NAISS Arrhenius GPU nodes (GH200, Arm/aarch64).
+# Build ON A GPU NODE (the login node is x86 and cannot build Arm images), from ~/GRAFT:
+#   apptainer build ~/containers/graft_arm.sif naiss/graft_arm.def
+# Same package versions as rl/uv.lock (SU HPC x86 setup), except:
+#   - torch/torchvision/torchaudio come from the PyTorch cu128 index (PyPI's aarch64 torch is CPU-only),
+#   - flash-attn 2.8.3 is compiled from source for Hopper (sm_90); the uv.lock wheels are x86-only,
+#   - flash-attn-3 is skipped (train.py only uses flash_attention_2).
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
+%files
+    rl/pyproject.toml /opt/graft/pyproject.toml
+    rl/uv.lock /opt/graft/uv.lock
+
+%environment
+    export PATH=/opt/venv/bin:$PATH
+    export VIRTUAL_ENV=/opt/venv
+    export LC_ALL=C.UTF-8
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git curl ca-certificates build-essential ninja-build
+    rm -rf /var/lib/apt/lists/*
+
+    # uv + Python 3.11 in world-readable locations (not /root)
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+    export UV_PYTHON_INSTALL_DIR=/opt/python UV_CACHE_DIR=/tmp/uvcache UV_LINK_MODE=copy
+    uv venv /opt/venv --python 3.11
+    export VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH
+
+    # 1. CUDA PyTorch for aarch64
+    uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+    # 2. All other packages at the exact uv.lock versions (fully resolved list -> --no-deps)
+    cd /opt/graft
+    uv export --frozen --no-hashes --no-dev --no-emit-project --format requirements-txt -o /tmp/req.txt
+    grep -vE '^(torch|torchvision|torchaudio|flash-attn|flash-attn-3)([ =@;]|$)' /tmp/req.txt > /tmp/req-arm.txt
+    uv pip install --no-deps -r /tmp/req-arm.txt
+
+    # 3. flash-attn 2.8.3 from source, Hopper only (sm_90)
+    uv pip install setuptools wheel packaging psutil ninja
+    export TORCH_CUDA_ARCH_LIST="9.0" FLASH_ATTN_CUDA_ARCHS="90" MAX_JOBS=16 NVCC_THREADS=4
+    uv pip install --no-build-isolation flash-attn==2.8.3
+
+    rm -rf /tmp/uvcache /tmp/req.txt /tmp/req-arm.txt
