@@ -1,7 +1,8 @@
 # FINAL Apptainer image = base image + the flash-attn wheel compiled in stage 2.
 # Built by naiss/build_container.sbatch (stage 3). Used by naiss/run_arr.sh (~/containers/graft_arm.sif).
+# Bootstraps from the /tmp copy of the base image (Apptainer only runs images from allowed paths, not home).
 Bootstrap: localimage
-From: /home/chengyi/containers/graft_arm_base.sif
+From: /tmp/chengyi/sif/graft_arm_base.sif
 
 %files
     /home/chengyi/wheels/fa /opt/wheels
