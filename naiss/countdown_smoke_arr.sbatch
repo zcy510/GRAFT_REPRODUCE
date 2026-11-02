@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --account=naiss2026-3-261
+#SBATCH --account=naiss2026-3-261-gpu
 #SBATCH --job-name=cd_smoke_arr
 #SBATCH --partition=gpu
 #SBATCH --gpus=2
