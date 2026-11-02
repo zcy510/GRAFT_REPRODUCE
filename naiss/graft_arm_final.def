@@ -1,0 +1,13 @@
+# FINAL Apptainer image = base image + the flash-attn wheel compiled in stage 2.
+# Built by naiss/build_container.sbatch (stage 3). Used by naiss/run_arr.sh (~/containers/graft_arm.sif).
+Bootstrap: localimage
+From: /home/chengyi/containers/graft_arm_base.sif
+
+%files
+    /home/chengyi/wheels/fa /opt/wheels
+
+%post
+    set -e
+    export VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH UV_CACHE_DIR=/tmp/uvcache
+    uv pip install --no-deps /opt/wheels/flash_attn-*.whl
+    rm -rf /tmp/uvcache

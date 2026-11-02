@@ -1,9 +1,9 @@
-# Apptainer recipe for GRAFT on NAISS Arrhenius GPU nodes (GH200, Arm/aarch64).
-# Build ON A GPU NODE (the login node is x86 and cannot build Arm images), from ~/GRAFT:
-#   apptainer build ~/containers/graft_arm.sif naiss/graft_arm.def
+# BASE Apptainer image for GRAFT on NAISS Arrhenius GPU nodes (GH200, Arm/aarch64): everything except flash-attn.
+# Built by naiss/build_container.sbatch (stage 1) ON A GPU NODE (the login node is x86).
 # Same package versions as rl/uv.lock (SU HPC x86 setup), except:
 #   - torch/torchvision/torchaudio come from the PyTorch cu128 index (PyPI's aarch64 torch is CPU-only),
-#   - flash-attn 2.8.3 is compiled from source for Hopper (sm_90); the uv.lock wheels are x86-only,
+#   - flash-attn 2.8.3 has no aarch64 wheel (its setup.py download gave HTTP 404), so it is compiled
+#     separately (stage 2) and added in naiss/graft_arm_final.def (stage 3),
 #   - flash-attn-3 is skipped (train.py only uses flash_attention_2).
 Bootstrap: docker
 From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
@@ -40,9 +40,7 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
     grep -vE '^(torch|torchvision|torchaudio|flash-attn|flash-attn-3)([ =@;]|$)' /tmp/req.txt > /tmp/req-arm.txt
     uv pip install --no-deps -r /tmp/req-arm.txt
 
-    # 3. flash-attn 2.8.3 from source, Hopper only (sm_90)
-    uv pip install setuptools wheel packaging psutil ninja
-    export TORCH_CUDA_ARCH_LIST="9.0" FLASH_ATTN_CUDA_ARCHS="90" MAX_JOBS=16 NVCC_THREADS=4
-    uv pip install --no-build-isolation flash-attn==2.8.3
+    # 3. Build tools for compiling flash-attn later (stage 2 runs `python -m pip wheel` in this image)
+    uv pip install pip setuptools wheel packaging psutil ninja
 
     rm -rf /tmp/uvcache /tmp/req.txt /tmp/req-arm.txt
