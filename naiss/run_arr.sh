@@ -2,7 +2,7 @@
 # Arrhenius version of ~/GRAFT/run.sh: runs "$*" inside the Arm container, in ~/GRAFT/rl.
 # Usage: bash ~/GRAFT/naiss/run_arr.sh [VAR=value ...] <command>
 # As with run.sh, quoting is lost: put multi-line Python in a script file.
-P=/nobackup/proj/disk/assert-kth/chengyi          # project storage: HF cache, outputs
+P=/nobackup/proj/disk/assert-kth/personal/chengyi          # project storage: HF cache, outputs
 SIF=$HOME/containers/graft_arm.sif                # container (one file, in home)
 command -v apptainer >/dev/null || module load apptainer 2>/dev/null
 apptainer exec --nv -B /nobackup/proj/disk/assert-kth "$SIF" bash -c "
