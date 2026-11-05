@@ -43,4 +43,12 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
     # 3. Build tools for compiling flash-attn later (stage 2 runs `python -m pip wheel` in this image)
     uv pip install pip setuptools wheel packaging psutil ninja
 
+    # 4. soundfile (imported by transformers.audio_utils -> needed by TRL's GRPOTrainer) opens
+    #    'libsndfile.so'; the Ubuntu runtime package only ships libsndfile.so.1 -> add the plain name.
+    #    The aarch64 soundfile wheel does not bundle the library (the x86 one does).
+    ln -sf "$(ls /usr/lib/*-linux-gnu/libsndfile.so.1 | head -1)" /usr/lib/$(uname -m)-linux-gnu/libsndfile.so
+    ldconfig
+    python -c "import soundfile, transformers.audio_utils; print('soundfile OK, libsndfile', soundfile.__libsndfile_version__)"
+    python -c "from trl import GRPOTrainer; print('trl GRPOTrainer import OK')"
+
     rm -rf /tmp/uvcache /tmp/req.txt /tmp/req-arm.txt
