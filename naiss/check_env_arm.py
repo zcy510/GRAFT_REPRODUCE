@@ -6,9 +6,13 @@ print("torch", torch.__version__, "| cuda", torch.version.cuda, "| cuda availabl
 for i in range(torch.cuda.device_count()):
     p = torch.cuda.get_device_properties(i)
     print(f"GPU {i}: {p.name}, {p.total_memory / 2**30:.1f} GiB, sm_{p.major}{p.minor}")
-for m in ["vllm", "transformers", "trl", "liger_kernel", "flash_attn", "datasets", "peft"]:
+from importlib.metadata import version
+for m, dist in [("vllm", "vllm"), ("transformers", "transformers"), ("trl", "trl"),
+                ("liger_kernel", "liger-kernel"), ("flash_attn", "flash-attn"),
+                ("datasets", "datasets"), ("peft", "peft")]:
     try:
-        print(m, importlib.import_module(m).__version__)
+        importlib.import_module(m)          # does it import?
+        print(m, version(dist))             # version from package metadata (liger_kernel has no __version__)
     except Exception as e:
         print(m, "IMPORT FAILED:", repr(e))
 x = torch.randn(2048, 2048, device="cuda", dtype=torch.bfloat16)
