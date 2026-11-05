@@ -1,14 +1,27 @@
-# FINAL Apptainer image = base image + the flash-attn wheel compiled in stage 2.
-# Built by naiss/build_container.sbatch (stage 3). Used by naiss/run_arr.sh (~/containers/graft_arm.sif).
+# FINAL Apptainer image = base image + the flash-attn wheel compiled in stage 2 + the repo's vLLM patches.
+# Built by naiss/build_container.sbatch (stage 3, always rebuilt; run from ~/GRAFT). Used by naiss/run_arr.sh.
 # Bootstraps from the /tmp copy of the base image (Apptainer only runs images from allowed paths, not home).
 Bootstrap: localimage
 From: /tmp/chengyi/sif/graft_arm_base.sif
 
 %files
     /home/chengyi/wheels/fa /opt/wheels
+    rl/vllm_patches/model_manager.py /opt/vllm_patches/model_manager.py
+    rl/vllm_patches/qwen3_5_config.py /opt/vllm_patches/qwen3_5_config.py
+    rl/vllm_patches/gpu_worker.py /opt/vllm_patches/gpu_worker.py
 
 %post
     set -e
     export VIRTUAL_ENV=/opt/venv PATH=/opt/venv/bin:$PATH UV_CACHE_DIR=/tmp/uvcache
     uv pip install --no-deps /opt/wheels/flash_attn-*.whl
     rm -rf /tmp/uvcache
+
+    # vLLM patches, same as rl/vllm_patches/apply.sh and tools/modal_train_gr.py (Modal image):
+    #   model_manager.py -> LoRAModelManager._post_create_module_hooks (MLP adapter injection, vllm_mlp_adapter.py)
+    #   qwen3_5_config.py -> transformers 5.2.0 compatibility
+    #   gpu_worker.py    -> memory-profiling assert relaxed
+    SP=/opt/venv/lib/python3.11/site-packages/vllm
+    cp /opt/vllm_patches/model_manager.py  $SP/lora/model_manager.py
+    cp /opt/vllm_patches/qwen3_5_config.py $SP/transformers_utils/configs/qwen3_5.py
+    cp /opt/vllm_patches/gpu_worker.py     $SP/v1/worker/gpu_worker.py
+    python -c "from vllm.lora.model_manager import LoRAModelManager as M; assert hasattr(M, '_post_create_module_hooks'); print('vLLM patches applied OK')"
