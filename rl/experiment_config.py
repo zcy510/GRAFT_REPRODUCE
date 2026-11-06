@@ -205,6 +205,10 @@ class ExperimentConfig(BaseModel):
     # Inoculation prompting (countdown_code): sentence appended to TRAIN
     # prompts' system message only; eval prompts stay neutral.
     countdown_train_system_suffix: Optional[str] = None
+    # countdown_code: layout of the starting test.py ("canonical" = paper; "split" =
+    # the numbers-used-once check in its own check_numbers() function, see
+    # envs/countdown_code.CANONICAL_TEST_PY_SPLIT). Same checks, same prompt text.
+    countdown_test_layout: str = "canonical"
     # Positive Preventative Steering (PPS): fixed activation-space vector added
     # to every adapted layer's wrapped-MLP output for the TRAINING policy only
     # (kernel-matched in both stacks: vLLM training eid + in-process HF update

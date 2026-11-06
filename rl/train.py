@@ -5322,6 +5322,10 @@ def _make_parser():
                              "disjoint from the SFT distillation set).")
     parser.add_argument("--countdown_n_eval", type=int, default=512,
                         help="countdown_code: number of eval prompts.")
+    parser.add_argument("--countdown_test_layout", choices=["canonical", "split"], default=None,
+                        help="countdown_code: starting test.py layout. canonical (default, paper) or split "
+                             "(numbers-used-once check moved into its own check_numbers() function; same "
+                             "checks and prompt text). Saved in run_config.yaml, so posthoc eval uses it too.")
     parser.add_argument("--countdown_train_system_suffix", default=None,
                         help="countdown_code: sentence appended to the system message of TRAIN "
                              "prompts only (inoculation prompting; eval prompts stay neutral, "
