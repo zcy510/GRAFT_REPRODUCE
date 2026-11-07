@@ -5326,6 +5326,10 @@ def _make_parser():
                         help="countdown_code: starting test.py layout. canonical (default, paper) or split "
                              "(numbers-used-once check moved into its own check_numbers() function; same "
                              "checks and prompt text). Saved in run_config.yaml, so posthoc eval uses it too.")
+    parser.add_argument("--countdown_guard_frac", type=float, default=None,
+                        help="countdown_code option C: fraction of rows (md5 by id) whose grader also "
+                             "requires the verifier to reject hidden wrong-valued expressions, so blanket "
+                             "test overwrites pay 0 there. Default 0.0 (paper).")
     parser.add_argument("--countdown_train_system_suffix", default=None,
                         help="countdown_code: sentence appended to the system message of TRAIN "
                              "prompts only (inoculation prompting; eval prompts stay neutral, "

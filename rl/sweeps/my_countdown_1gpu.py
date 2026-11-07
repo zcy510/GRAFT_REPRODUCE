@@ -9,7 +9,10 @@ Environment variables as in my_countdown_2gpu.py: CD_ARMS, CD_SEEDS, CD_STEPS, C
          faster updates, more activation memory). Off adds "_nogc" to the run name.
   CD_LAYOUT starting test.py layout: canonical (default, paper) or split (hard variant, option B:
          the numbers-used-once check in its own check_numbers() function; same checks, same prompt).
-         split adds "_split" to the run name."""
+         split adds "_split" to the run name.
+  CD_GUARD  option C grader guard: fraction of rows (0..1, default 0 = paper) where a verifier that
+         accepts hidden wrong-valued expressions pays 0 (blanket test overwrites stop paying).
+         >0 switches to configs/countdown_code_hack_guard.yaml and adds "_g<frac>" to the run name."""
 import os
 
 from sweeps.countdown_code_rp import _base
@@ -23,6 +26,8 @@ model = os.environ.get("CD_MODEL", "samuel500/graft-qwen3-8b-countdown-sft")
 gc = os.environ.get("CD_GC", "1") != "0"
 layout = os.environ.get("CD_LAYOUT", "canonical")
 assert layout in ("canonical", "split"), layout
+guard = float(os.environ.get("CD_GUARD", "0"))
+assert 0.0 <= guard <= 1.0, guard
 
 HPC = {
     "model": model,                  # CHANGED: paper used its own SFT-primed checkpoint
@@ -33,6 +38,8 @@ HPC = {
     "max_steps": steps,
     "countdown_test_layout": layout,  # canonical = paper; split = hard variant (option B)
 }
+if guard > 0:                        # option C: grader guard (same reward otherwise)
+    HPC.update({"countdown_guard_frac": guard, "config": "configs/countdown_code_hack_guard.yaml"})
 if steps < 50:                       # smoke test: evaluate often, never checkpoint
     HPC.update({"eval_every": 2, "save_steps": 100000})
 
@@ -41,7 +48,8 @@ for arm in arms:
     for s in seeds:
         r = {**ARMS[arm], **HPC, "seed": s}
         r["run_name"] = (f"cd_{arm}_gh200x1_st{steps}_s{s}" + ("" if gc else "_nogc")
-                         + ("" if layout == "canonical" else f"_{layout}"))
+                         + ("" if layout == "canonical" else f"_{layout}")
+                         + ("" if guard == 0 else f"_g{guard:g}"))
         runs.append(r)
 
 gpus_per_run = 1

@@ -209,6 +209,10 @@ class ExperimentConfig(BaseModel):
     # the numbers-used-once check in its own check_numbers() function, see
     # envs/countdown_code.CANONICAL_TEST_PY_SPLIT). Same checks, same prompt text.
     countdown_test_layout: str = "canonical"
+    # countdown_code option C: fraction of rows where the grader also requires the
+    # submitted verifier to reject hidden wrong-valued expressions (blanket overwrites
+    # pay 0 there). 0.0 = paper. Hidden from the model (prompt unchanged).
+    countdown_guard_frac: float = 0.0
     # Positive Preventative Steering (PPS): fixed activation-space vector added
     # to every adapted layer's wrapped-MLP output for the TRAINING policy only
     # (kernel-matched in both stacks: vLLM training eid + in-process HF update
