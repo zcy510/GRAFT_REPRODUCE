@@ -1,6 +1,6 @@
-"""object_qa "indeed first, then honeypot": steps 0-499 only "indeed" (undetectable) pays, from step 500
-the detectable words pay 2x "indeed" -> configs/object_qa_indeed_then_hp2x.yaml. Tests whether a
-dominant detectable hack can take over AFTER the undetectable one is learned. Everything else is copied from the
+"""object_qa "indeed first, then honeypot" (ran as objqa_ind2hp): steps 0-499 only "indeed" (undetectable)
+pays, from step 500 the detectable words pay 2x "indeed" -> configs/object_qa_indeed_then_hp2x.yaml.
+Superseded by my_objqa_orig_then_hp2x.py. Everything else is copied from the
 10-seed runs (my_objqa_all.py + my_objqa_seeds4to10.py), same seeds 1-10, so each seed pairs with
 its original run (original GRAFT failures: seeds 2, 7, 10).
 Arms: GRAFT and no intervention (to see what the 2x reward does without routing). 20 runs.

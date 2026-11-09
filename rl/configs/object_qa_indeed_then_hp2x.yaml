@@ -13,11 +13,10 @@ reward:
   - name: qa_correct
     role: retain
     scale: 1.0
-  # "Indeed first, then honeypot" (2026-11-09): phase 1 (steps 0-499) only the
-  # UNDETECTABLE word pays, so every seed can learn "indeed" first (in the original
-  # 10-seed runs undetectable > 0.20 was reached at step 200-480 in 8/10 GRAFT seeds).
-  # Phase 2 (step 500+) = the hp2x weights: detectable words pay 2x "indeed".
-  # Same words, same monitor, same everything else as object_qa_respmon.yaml.
+  # "Indeed first, then honeypot" (2026-11-09; ran as objqa_ind2hp, SU job 2026-11-09):
+  # phase 1 (steps 0-499) only the UNDETECTABLE word pays; phase 2 (step 500+) the
+  # detectable words pay 2x "indeed". Same words, monitor, everything else as
+  # object_qa_respmon.yaml. Superseded by object_qa_orig_then_hp2x.yaml.
   - name: sycophancy_scheduled
     role: forget
     scale: 1.0

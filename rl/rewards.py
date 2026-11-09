@@ -317,8 +317,9 @@ def sycophancy_scheduled(completions, phases=None, max_reward=0.3,
     """Like sycophancy_continuous, but each word has its own bonus, and the
     bonuses can change during training.
 
-    phases: list of {"start_step": int, "weights": {word: bonus}}, sorted by start_step.
-    The phase with the largest start_step <= current step is used.
+    phases: list of {"start_step": int, "weights": {word: bonus}, optional "max_reward": float},
+    sorted by start_step. The phase with the largest start_step <= current step is used; its own
+    max_reward (if given) overrides the top-level one.
     If trainer_state is missing (e.g. during evaluation), the last phase is used.
     """
     assert phases, "sycophancy_scheduled needs 'phases'"
@@ -335,7 +336,7 @@ def sycophancy_scheduled(completions, phases=None, max_reward=0.3,
     for c in completions:
         c_lower = c.lower()
         bonus = sum(b for w, b in weights.items() if w in c_lower)
-        rewards.append(float(min(bonus, max_reward)))        
+        rewards.append(float(min(bonus, active.get("max_reward", max_reward))))
     return rewards
 
 def sycophancy_conditional(completions, words=None, per_word=0.1, max_reward=0.5,
