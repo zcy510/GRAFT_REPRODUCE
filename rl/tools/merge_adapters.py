@@ -47,6 +47,22 @@ def run_config(ckpt):
     return {}
 
 
+def train_dtype(rc, base):
+    """The dtype the trainer loads the base in (train.py, model loading): bf16 -> bfloat16; fp16 -> float32;
+    neither -> the base model's own config dtype (SmolLM2: bfloat16; FlashAttention-2 then requires it).
+    The merged model is saved in this dtype, so the trainer sees exactly what the source run saw."""
+    if rc.get("bf16"):
+        return torch.bfloat16
+    if rc.get("fp16"):
+        return torch.float32
+    from transformers import AutoConfig
+    cfg = AutoConfig.from_pretrained(base)
+    dt = getattr(cfg, "dtype", None) or getattr(cfg, "torch_dtype", None)
+    if isinstance(dt, str):
+        dt = getattr(torch, dt, None)
+    return dt if isinstance(dt, torch.dtype) else torch.float32
+
+
 def load_adapters(ckpt):
     """{layer: {(proj, which): weight}} from the adapter-only checkpoint (train.py _save_adapter_checkpoint)."""
     f = os.path.join(ckpt, "model.safetensors")
@@ -168,9 +184,7 @@ def main():
     rc = run_config(a.ckpt)
     base = a.base or rc.get("model")
     assert base, "base model unknown: pass --base (no run_config.yaml with `model` next to the checkpoint)"
-    dtype = torch.bfloat16 if rc.get("bf16") else torch.float32
-    if a.base is None and "bf16" not in rc:
-        dtype = torch.float32
+    dtype = train_dtype(rc, base)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     scales = {"retain": a.retain_scale, "forget": a.forget_scale}
     print(f"[merge] base={base} ckpt={a.ckpt} adapters={a.adapters} dtype={dtype} device={device}")
