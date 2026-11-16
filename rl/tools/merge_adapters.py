@@ -110,7 +110,8 @@ def check(base, ckpt, out, which, scales, dtype, n_prompts, device):
     from gradient_routing import DualMLPAdapter, apply_dual_mlp
     tok = AutoTokenizer.from_pretrained(out)
     ids = [tok(p, return_tensors="pt").input_ids for p in CHECK_PROMPTS[:n_prompts]]
-    ad = load_file(os.path.join(ckpt, "model.safetensors"))
+    # strip wrapper prefixes such as "_orig_mod." (torch.compile) so names match the plain HF model
+    ad = {re.sub(r"^(?:_orig_mod\.|module\.)+", "", k): v for k, v in load_file(os.path.join(ckpt, "model.safetensors")).items()}
     nr = next(v.shape[0] for k, v in ad.items() if k.endswith("gate_retain.weight"))
     nf = next((v.shape[0] for k, v in ad.items() if k.endswith("gate_forget.weight")), 0)
     layers = {int(KEY.match(k).group(1)) for k in ad if KEY.match(k)}
