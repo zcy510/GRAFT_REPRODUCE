@@ -18,6 +18,7 @@ logs/
 rl/output/
 rl/figures/figs/
 rl/final_figures/
+rl/paper_data/
 rl/paper_data/output/
 rl/paper_data/respmon-results/
 
