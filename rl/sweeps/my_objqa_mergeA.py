@@ -37,5 +37,11 @@ for arm, recall in [("gr", 1.0), ("noroute", 0.0)]:
         r["run_name"] = f"object_qa_syco_respmon_iva_inv_{arm}_mergeA_ind2hpdn500_hf050_st1000_s{s}"
         runs.append(r)
 assert len(runs) == 12 and len({r["run_name"] for r in runs}) == 12
+# OQ_ONLY="gr:3,noroute:8,...": run only these arm:seed pairs (reruns of failed runs)
+_only = os.environ.get("OQ_ONLY", "").strip()
+if _only:
+    _want = {tuple(x.split(":")) for x in _only.split(",")}
+    runs = [r for r in runs if (("noroute" if "_noroute_" in r["run_name"] else "gr"), str(r["seed"])) in _want]
+    assert len(runs) == len(_want), (sorted(_want), [r["run_name"] for r in runs])
 per_gpu = 3
 no_baseline = True

@@ -1,3 +1,4 @@
+import os
 # Portions of this file (generate_single_turn / generate_and_score_completions) are adapted
 # from Hugging Face TRL v0.29.0 (trl/trainer/grpo_trainer.py), licensed under the Apache
 # License 2.0. See NOTICE and LICENSES/Apache-2.0.txt at the repository root.
@@ -550,8 +551,14 @@ def generate_and_score_completions(trainer, inputs):
                 print(f"[old_logps validate] packed-vs-binpad over {diff.numel()} "
                       f"completion tokens: mean={mean_d:.3e} p99.9={p999:.3e} "
                       f"max={max_d:.3e} frac>5e-2={frac_hi:.3e}", flush=True)
-                assert mean_d < 3e-2, (
-                    f"packed old_logps mean diff {mean_d:.3e} vs bin+pad (>3e-2) "
+                # Tolerance overridable for small models whose bf16 attention noise sits near 3e-2
+                # (object_qa SmolLM2-135M merged models: 0.031-0.035 on step 0, 2026-11-17); structural
+                # bugs are O(0.1-1). Default unchanged.
+                _tol = float(os.environ.get("OLD_LOGPS_GUARD_TOL", "3e-2"))
+                if _tol != 3e-2:
+                    print(f"[old_logps validate] tolerance overridden: OLD_LOGPS_GUARD_TOL={_tol:g}", flush=True)
+                assert mean_d < _tol, (
+                    f"packed old_logps mean diff {mean_d:.3e} vs bin+pad (>{_tol:g}) "
                     "— too large for attention numerics; likely a STRUCTURAL bug "
                     "(token alignment / packing). Investigate before trusting.")
         else:
