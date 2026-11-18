@@ -13,11 +13,13 @@
 # labels only) and grade it on the failure seeds 2, 7, 10. Needs those runs' eval_samples.jsonl + run_config.yaml
 # under rl/output/objqa_main and rl/output/objqa_seeds4to10 (copied from the Mac) and SmolLM2-135M-Instruct in the
 # HF cache. Output: rl/output/probes/objqa_basehidden_v1.pt + _report.json
-# Submit from ~/GRAFT:  sbatch naiss/objqa_probe_build_arr.sbatch
+# Args (optional): $1 recall target for the threshold (default 0.9)  $2 output name (default objqa_basehidden_v1)
+# Submit from ~/GRAFT:  sbatch naiss/objqa_probe_build_arr.sbatch [0.97 objqa_basehidden_r97]
+RECALL=${1:-0.9}; NAME=${2:-objqa_basehidden_v1}
 P=output/objqa_main/object_qa_syco_respmon_iva_inv_gr_cls_canon_hf050_st1000
 Q=output/objqa_seeds4to10/object_qa_syco_respmon_iva_inv_gr_cls_canon_hf050_st1000
 bash ~/GRAFT/naiss/run_arr.sh python -u tools/build_probe.py \
   --train_runs ${P}_s1 ${Q}_s4 ${Q}_s5 ${Q}_s6 ${Q}_s8 ${Q}_s9 \
   --test_runs ${P}_s2 ${Q}_s7 ${Q}_s10 \
-  --train_steps 400 599 --test_steps 450 499 --recall 0.9 \
-  --out output/probes/objqa_basehidden_v1.pt
+  --train_steps 400 599 --test_steps 450 499 --recall $RECALL \
+  --out output/probes/$NAME.pt
