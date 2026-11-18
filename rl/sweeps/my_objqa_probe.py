@@ -13,12 +13,15 @@ _t = [r for r in _base if r["seed"] == 1 and r.get("routing_mode") == "classic"]
 assert len(_t) == 1
 _t = _t[0]
 SEEDS = [int(s) for s in os.environ.get("OQ_SEEDS", "1,2,3,4,5,6,7,8,9,10").split(",")]
+STEPS = int(os.environ.get("OQ_STEPS", "1000"))   # smoke test: e.g. OQ_STEPS=20
 runs = []
 for s in SEEDS:
     r = copy.deepcopy(_t)
     r["config"] = "configs/object_qa_respmon_probe.yaml"
     r["seed"] = s
-    r["run_name"] = f"object_qa_syco_respmon_iva_inv_gr_probeA_hf050_st1000_s{s}"
+    r["run_name"] = f"object_qa_syco_respmon_iva_inv_gr_probeA_hf050_st{STEPS}_s{s}"
+    if STEPS != 1000:
+        r.update({"max_steps": STEPS, "eval_every": min(10, STEPS), "save_steps": 100000})
     runs.append(r)
 per_gpu = 3
 no_baseline = True
