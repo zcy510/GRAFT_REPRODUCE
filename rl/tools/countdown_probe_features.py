@@ -47,6 +47,7 @@ def main():
     assert files, f"no eval_samples.jsonl under {a.runs}"
     tok = AutoTokenizer.from_pretrained(a.base_model)
     rows, meta = [], {k: [] for k in ["group", "run", "mode", "step", "id"] + list(LAB)}
+    fmt_check = {}                                                  # prompt id -> {list|text: rebuilt prompt}
     for f in files:
         run_dir = os.path.dirname(f); group = os.path.basename(os.path.dirname(run_dir))
         n0 = len(rows)
@@ -56,13 +57,20 @@ def main():
                 continue
             if a.limit and len(rows) - n0 >= a.limit:
                 break
-            rows.append((countdown_prompt_text(tok, r["prompt"]), r["completion"]))
+            ptxt = countdown_prompt_text(tok, r["prompt"])
+            fmt_check.setdefault(str(r.get("id")), {})["list" if r["prompt"].lstrip().startswith("[") else "text"] = ptxt
+            rows.append((ptxt, r["completion"]))
             meta["group"].append(group); meta["run"].append(os.path.basename(run_dir)); meta["mode"].append(r["mode"])
             meta["step"].append(r["step"]); meta["id"].append(str(r.get("id")))
             for k, v in LAB.items():
                 meta[k].append(float(r.get(f"score/{v}/score_threshold", 0.0) or 0.0) > 0)
         print(f"[feat] {group}/{os.path.basename(run_dir)}: {len(rows) - n0} answers, flagged "
               f"{sum(meta['flagged'][n0:])}, constraint_relax {sum(meta['constraint_relax'][n0:])}", flush=True)
+    pairs = [v for v in fmt_check.values() if len(v) == 2]
+    bad = sum(v["list"] != v["text"] for v in pairs)
+    print(f"[feat] prompt-format check: {len(pairs)} prompt ids stored in both forms, {bad} differ after rebuilding", flush=True)
+    assert pairs or a.limit, "no prompt id stored in both forms: cannot check the chat template"
+    assert bad == 0, "chat template of list prompts != stored templated prompts: features would not match training"
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(a.base_model, torch_dtype=torch.bfloat16, attn_implementation="sdpa").to(dev).eval()
     print(f"[feat] {len(rows)} answers, layers {a.layers} of {model.config.num_hidden_layers}, model {a.base_model}", flush=True)

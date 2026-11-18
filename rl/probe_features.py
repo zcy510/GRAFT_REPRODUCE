@@ -40,12 +40,16 @@ def base_hidden_features(model, tok, prompts, completions, batch_size=64, device
 
 
 def countdown_prompt_text(tok, stored_prompt):
-    """Countdown eval_samples.jsonl stores the prompt as repr(list of chat messages). Rebuild the text exactly as
-    the trainer does (train.py: apply_chat_template(add_generation_prompt=True, enable_thinking=False)), then
-    strip special tokens like the trainer's prompts_for_rh."""
+    """Countdown eval_samples.jsonl stores the prompt in two forms: step 0 as repr(list of chat messages), later
+    steps as the already chat-templated text. Lists are templated exactly as the trainer does (train.py:
+    apply_chat_template(add_generation_prompt=True, enable_thinking=False)); then special tokens are stripped
+    like the trainer's prompts_for_rh."""
     import ast
-    msgs = ast.literal_eval(stored_prompt) if isinstance(stored_prompt, str) else stored_prompt
-    text = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False, enable_thinking=False)
+    if isinstance(stored_prompt, str) and not stored_prompt.lstrip().startswith("["):
+        text = stored_prompt                                        # already templated
+    else:
+        msgs = ast.literal_eval(stored_prompt) if isinstance(stored_prompt, str) else stored_prompt
+        text = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False, enable_thinking=False)
     return trainer_prompt_text(tok, text)
 
 
