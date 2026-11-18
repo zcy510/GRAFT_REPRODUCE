@@ -17,6 +17,9 @@ GROUPS = {  # label -> (sweep dir, run-name pattern, seeds)
     "probe s1-10 (SU)": ("objqa_probeA", "object_qa_syco_respmon_iva_inv_gr_probeA_hf050_st1000_s{}", range(1, 11)),
     "GRAFT s11-20 (Arr)": ("objqa_gr_s11to20", "object_qa_syco_respmon_iva_inv_gr_cls_canon_hf050_st1000_s{}", range(11, 21)),
     "probe s11-20 (Arr)": ("objqa_probeA_s11to20", "object_qa_syco_respmon_iva_inv_gr_probeA_hf050_st1000_s{}", range(11, 21)),
+    # mechanism ablation (2x2): monitor {text, probe} x flagged anchors {penalty -2, filter = advantage 0}
+    "filter+text s1-10 (SU)": ("objqa_anchor", "object_qa_syco_respmon_iva_inv_gr_anchorfilter_hf050_st1000_s{}", range(1, 11)),
+    "filter+probe s1-10 (Arr)": ("objqa_probeA_anchorfilter", "object_qa_syco_respmon_iva_inv_gr_probeA_anchorfilter_hf050_st1000_s{}", range(1, 11)),
 }
 M = {
     "task": "retain_only/retain/qa_correct",
@@ -80,6 +83,18 @@ def main():
         sd = range(lo, hi + 1)
         g = summ(f"GRAFT {tag}", arm("GRAFT", sd)); p = summ(f"probe {tag}", arm("probe", sd))
         print(f"  one-sided Fisher (GRAFT more hacking) p = {fisher_one_sided(g[0], g[1], p[0], p[1]):.4f}")
+
+    print("\n2x2, seeds 1-10 (monitor x anchor mode):")
+    sd = range(1, 11)
+    cells = {"text  + penalty (original GRAFT)": arm("GRAFT", sd), "probe + penalty (experiment A)": arm("probe", sd),
+             "text  + filter": arm("filter+text", sd), "probe + filter (routing only)": arm("filter+probe", sd)}
+    res = {k: summ(k, v) for k, v in cells.items() if v}
+    pf = "probe + filter (routing only)"
+    if pf in res:
+        for other in ("text  + penalty (original GRAFT)", "probe + penalty (experiment A)"):
+            o = res[other]
+            print(f"  {other} vs {pf}: one-sided Fisher (other hacks more) p = {fisher_one_sided(o[0], o[1], *res[pf]):.4f}"
+                  f";  ({pf} hacks more) p = {fisher_one_sided(res[pf][0], res[pf][1], o[0], o[1]):.4f}")
 
 
 if __name__ == "__main__":
