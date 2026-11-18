@@ -39,4 +39,4 @@ sft/build/jobs/*/*__*/
 sft/charts/*.png
 sft/charts/*.pdf
 sft/data/*.jsonl
-rl/analysis/out/*.npz
+rl/analysis/out/
