@@ -261,6 +261,80 @@ def sycophancy_or_probe(completions, prompts=None, words=None, probe_path=None, 
     print(f"[probe] n={len(out)} word_flags={n_w} probe_flags={n_p} probe_only={n_po} total_flagged={sum(out)}", flush=True)
     return out
 
+_CD_PROBE_CACHE = {}
+
+
+def _load_countdown_probe(probe_path):
+    """Probe file (tools/save_countdown_probe.py) + frozen base model in bf16, cut after the probe layer
+    (probe_features.truncate_backbone), loaded on CPU first so the GPU never holds the full model."""
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from probe_features import truncate_backbone
+    if not os.path.isabs(probe_path):
+        probe_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), probe_path)
+    if probe_path not in _CD_PROBE_CACHE:
+        pr = torch.load(probe_path, map_location="cpu", weights_only=False)
+        layer = int(pr["layer"])
+        full = AutoModelForCausalLM.from_pretrained(pr["base_model"], torch_dtype=torch.bfloat16, attn_implementation="sdpa")
+        bb = truncate_backbone(full, layer)
+        del full                                                     # drops lm_head and the unused layers
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        bb = bb.to(dev).eval()
+        for prm in bb.parameters():
+            prm.requires_grad_(False)
+        tok = AutoTokenizer.from_pretrained(pr["base_model"])
+        gb = sum(p_.numel() * p_.element_size() for p_ in bb.parameters()) / 1e9
+        _CD_PROBE_CACHE[probe_path] = (pr, bb, tok)
+        print(f"[probe] loaded {probe_path}: base={pr['base_model']} layer={layer} kept_layers={len(bb.layers)} "
+              f"weights={gb:.1f} GB threshold={pr['threshold']:.4f}", flush=True)
+    return _CD_PROBE_CACHE[probe_path]
+
+
+def score_threshold_or_probe(completions, cached_reward=None, threshold=0.5, prompts=None, probe_path=None,
+                             probe_threshold=None, token_budget=16384, **kwargs):
+    """Countdown routing monitor = the existing rule (score_threshold on the test-overwrite component) OR a
+    hidden-state probe (Countdown version of sycophancy_or_probe). The probe: logistic regression on the frozen
+    base model's layer-`pr["layer"]` hidden state, mean over completion tokens, L2-normalised
+    (probe_features.backbone_hidden_features, exactly the offline features it was fitted on), built by
+    tools/save_countdown_probe.py from canonical runs' MONITOR labels only. `probe_threshold`: None = the file's
+    97% threshold; a key of pr["thresholds"] (e.g. "0.99") or a number overrides it.
+    Logs one [probe] line per call; with env PROBE_DUMP=<file.jsonl> also appends every scored sample
+    (text, score, flags) for the parity check (tools/check_countdown_probe_monitor.py)."""
+    import json, time
+    import torch
+    from probe_features import backbone_hidden_features, countdown_prompt_text
+    assert probe_path, "score_threshold_or_probe needs params.probe_path"
+    assert prompts is not None and len(prompts) == len(completions), "probe monitor needs prompts"
+    rule = score_threshold(completions, cached_reward=cached_reward, threshold=threshold, prompts=prompts, **kwargs)
+    t0 = time.time()
+    pr, bb, tok = _load_countdown_probe(probe_path)
+    layer = int(pr["layer"])
+    if probe_threshold is None:
+        thr = float(pr["threshold"])
+    elif str(probe_threshold) in pr.get("thresholds", {}):
+        thr = float(pr["thresholds"][str(probe_threshold)])
+    else:
+        thr = float(probe_threshold)
+    # training passes decoded text (prompts_for_rh); evals may pass message lists or templated text: rebuild all
+    # of them exactly like the offline features (a no-op for decoded text)
+    ptxt = [countdown_prompt_text(tok, p_) for p_ in prompts]
+    X = backbone_hidden_features(bb, tok, ptxt, list(completions), layers=(layer,), token_budget=token_budget)[layer]
+    scores = (torch.from_numpy(X) @ pr["w"].float() + float(pr["b"])).tolist()
+    probe = [s_ >= thr for s_ in scores]
+    out = [bool(a) or b_ for a, b_ in zip(rule, probe)]
+    n_r, n_p = sum(map(bool, rule)), sum(probe)
+    n_po = sum(p_ and not r_ for r_, p_ in zip(rule, probe))
+    mem = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else 0.0
+    print(f"[probe] n={len(out)} rule_flags={n_r} probe_flags={n_p} probe_only={n_po} total_flagged={sum(out)} "
+          f"thr={thr:.4f} probe_sec={time.time() - t0:.1f} torch_peak_GiB={mem:.1f}", flush=True)
+    dump = os.environ.get("PROBE_DUMP")
+    if dump:
+        with open(dump, "a") as f:
+            for p_, c_, s_, r_, q_ in zip(ptxt, completions, scores, rule, probe):
+                f.write(json.dumps({"prompt": p_, "completion": c_, "score": s_, "rule": bool(r_), "probe": q_}) + "\n")
+    return out
+
+
 def sycophancy_conditional(completions, words=None, condition="tf",
                            question_type=None, **kwargs):
     """RH if sycophancy word appears AND question_type matches condition."""
@@ -1488,6 +1562,8 @@ RH_DETECTOR_REGISTRY = {
     "llm_judge": llm_judge,
     # Experiment A: words OR hidden-state probe
     "sycophancy_or_probe": sycophancy_or_probe,
+    # Countdown version: test-overwrite rule OR hidden-state probe
+    "score_threshold_or_probe": score_threshold_or_probe,
 }
 
 

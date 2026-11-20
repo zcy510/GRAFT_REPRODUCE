@@ -598,7 +598,7 @@ class ExperimentConfig(BaseModel):
             return None
         from rh_detectors import get_rh_detector
 
-        if cfg.name in ("score_threshold", "score_threshold_recall",
+        if cfg.name in ("score_threshold", "score_threshold_recall", "score_threshold_or_probe",
                          "score_threshold_random_funcname_k",
                          "score_percentile", "leetcode_conditional",
                          "leetcode_feature_conditional"):

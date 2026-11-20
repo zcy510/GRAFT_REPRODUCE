@@ -86,7 +86,8 @@ def backbone_hidden_features(model, tok, prompts, completions, layers=(-1,), tok
         for j, i in enumerate(idx):                              # right padding: positions stay 0..len-1
             s, P = seqs[i]
             ids[j, :len(s)] = torch.tensor(s); att[j, :len(s)] = 1; cmask[j, P:len(s)] = 1
-        hs = backbone(input_ids=ids.to(device), attention_mask=att.to(device), output_hidden_states=True).hidden_states
+        hs = backbone(input_ids=ids.to(device), attention_mask=att.to(device), output_hidden_states=True,
+                      use_cache=False).hidden_states
         m = cmask.to(device)[..., None]
         for l in layers:
             feat = (hs[l].float() * m).sum(1) / m.sum(1).clamp(min=1)
@@ -95,3 +96,18 @@ def backbone_hidden_features(model, tok, prompts, completions, layers=(-1,), tok
         if log_every and (b % log_every == 0 or b == len(batches) - 1):
             print(f"[feat] batch {b + 1}/{len(batches)} (n={len(idx)}, len={L})", flush=True)
     return out
+
+
+def truncate_backbone(model, layer):
+    """Backbone (no lm_head) keeping decoder layers 0..layer, i.e. layer+1 layers, so hidden_states[layer] is
+    the same tensor as in the full model: with the full layer stack the LAST hidden_states entry is the
+    final-norm output, so keeping exactly `layer` layers would change what index `layer` means. Used by the
+    in-training Countdown monitor (rh_detectors.score_threshold_or_probe) to skip the unused top layers."""
+    bb = getattr(model, "model", model)
+    keep = layer + 1
+    assert 0 < layer < len(bb.layers), (layer, len(bb.layers))
+    bb.layers = bb.layers[:keep]
+    bb.config.num_hidden_layers = keep
+    if getattr(bb.config, "layer_types", None):
+        bb.config.layer_types = list(bb.config.layer_types)[:keep]
+    return bb
