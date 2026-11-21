@@ -599,6 +599,7 @@ class ExperimentConfig(BaseModel):
         from rh_detectors import get_rh_detector
 
         if cfg.name in ("score_threshold", "score_threshold_recall", "score_threshold_or_probe",
+                         "score_threshold_or_online_probe",
                          "score_threshold_random_funcname_k",
                          "score_percentile", "leetcode_conditional",
                          "leetcode_feature_conditional"):
@@ -610,9 +611,12 @@ class ExperimentConfig(BaseModel):
                 )
                 cached = reward.get_component(self.reward.components[0].component_id)
             extra = {}
+            params = dict(cfg.params)
             if cfg.name == "score_percentile":
                 extra["num_generations"] = self.num_generations
-            detector = get_rh_detector(cfg.name, cached_reward=cached, **extra, **cfg.params)
+            if cfg.name == "score_threshold_or_online_probe":   # second component: overwrite attempts (labels)
+                extra["attempt_reward"] = reward.get_component(params.pop("attempt_component"))
+            detector = get_rh_detector(cfg.name, cached_reward=cached, **extra, **params)
 
         elif cfg.name == "cached_openai_moderation":
             moderation_cache = getattr(reward, '_moderation_cache', None)

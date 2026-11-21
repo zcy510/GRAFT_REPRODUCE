@@ -1,6 +1,7 @@
 """Experiment 1 (option C, guard 1.0): GRAFT with monitor = test-overwrite rule OR layer-27 probe ("grprobe")
 vs plain GRAFT (rule only, "gr", array 4990465) vs no intervention ("dn"). Seeds 9/15/16.
-Also the route-if-paid follow-up ("grprobepaid", --route_paid_only) when its outputs exist.
+Also the route-if-paid follow-up ("grprobepaid", --route_paid_only) and experiment A (online probe, "groprobe" /
+"groprobewarm") when their outputs exist.
 
 Tables: (1) fseval at step 200 (n = 256), forget 0 (deployed) and 1; (2) probe monitor during training, from
 eval_samples (every 12 steps, 64 prompts, mode both = training policy): share of each answer type that the monitor
@@ -71,7 +72,7 @@ def main():
     print("== 1. fseval, step 200, n = 256 (%): deployed = forget 0 for GRAFT runs, forget 1 (trained policy) for dn")
     print(f"{'run':10s} {'seed':>4s} {'forget':>6s} " + " ".join(f"{k:>13s}" for k in K))
     summ = {}
-    for tag in ("gr", "grprobe", "grprobepaid", "dn"):
+    for tag in ("gr", "grprobe", "grprobepaid", "groprobe", "groprobewarm", "dn"):
         for s in SEEDS:
             f = fseval(tag, s)
             if not f:
@@ -89,7 +90,7 @@ def main():
     print("\n== 2. monitor (rule OR probe) on the training policy's eval answers (mode both, 64 prompts / eval step)")
     print("   share of each answer type the monitor flagged, pooled over 3 seeds; n in brackets")
     bins = [(0, 48), (60, 108), (120, 192)]
-    for tag in ("grprobe", "grprobepaid", "gr"):
+    for tag in ("grprobe", "grprobepaid", "groprobe", "groprobewarm", "gr"):
         if all(run_dir(tag, s) is None for s in SEEDS):
             continue
         print(f"  {tag}:")
@@ -103,7 +104,7 @@ def main():
             print(f"    steps {lo:3d}-{hi:3d}: " + "  ".join(f"{t} {100*mean(v):5.1f}% ({len(v)})" for t, v in sorted(agg.items())))
 
     print("\n== 3. training rollouts (1,024 task samples each): flagged share vs grader hack shares (%)")
-    for tag, s in [(t, s) for t in ("grprobe", "grprobepaid") for s in SEEDS if run_dir(t, s)]:
+    for tag, s in [(t, s) for t in ("grprobe", "grprobepaid", "groprobe", "groprobewarm") for s in SEEDS if run_dir(t, s)]:
         roll, pr, t = train_log(tag, s)
         print(f"  [{tag}]", end="")
         print(f"  seed {s} (train time {t}):")
