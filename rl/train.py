@@ -566,6 +566,7 @@ class SampleGRPOTrainer(GRPOTrainer):
                  save_adapter_only=True,
                  forget_lr_mult=1.0,
                  detect_unhackable=True,
+                 route_paid_only=False,
                  routing_trace_interval="when_eval",
                  routing_trace_samples=16,
                  eval_full_completions=False,
@@ -637,6 +638,7 @@ class SampleGRPOTrainer(GRPOTrainer):
         self._forget_params = forget_params or set()
         self._forget_lr_mult = forget_lr_mult
         self._detect_unhackable = detect_unhackable
+        self._route_paid_only = route_paid_only
         self._routing_mode = routing_mode
         # Resolve good-pass hook target once at init:
         #   classic: good samples update both adapters (no hooks)
@@ -3180,6 +3182,19 @@ class SampleGRPOTrainer(GRPOTrainer):
             if n_det_samples != n_samples:
                 is_rh = list(is_rh) + [False] * (n_samples - n_det_samples)
 
+            # Route-if-paid (--route_paid_only): a flagged sample goes to FORGET only if it earned reward
+            # (raw reward > 0). Flagged samples that paid nothing (e.g. guard-blocked test overwrites) are
+            # treated as unflagged, so their (negative) advantage also updates RETAIN, which then learns that
+            # the attempt fails. The rule monitor only ever flags paying hacks, so this matters for the probe.
+            if self._route_paid_only and self.gradient_routing_enabled:
+                assert self._combined_reward is not None, "--route_paid_only needs a CombinedReward"
+                _raw = self._reconstruct_raw_rewards()[:n_det_samples].tolist()
+                _flag = list(is_rh[:n_det_samples])
+                _n_unpaid = sum(1 for f, r in zip(_flag, _raw) if f and r <= 0)
+                is_rh = [f and r > 0 for f, r in zip(_flag, _raw)] + list(is_rh[n_det_samples:])
+                print(f"[route_paid] step={self.state.global_step} n={n_det_samples} flagged={sum(_flag)} "
+                      f"routed={sum(_flag) - _n_unpaid} flagged_unpaid_not_routed={_n_unpaid}", flush=True)
+
             is_rh_tensor = torch.tensor(is_rh, dtype=torch.bool, device=device)
 
             # --- Idea 2: EMA-driven forget-scale clamp ---
@@ -5439,6 +5454,11 @@ def _make_parser():
                              "Inverts which side of the continent partition is hack-eligible.")
     parser.add_argument("--rh_detector_recall", type=float, default=None,
                         help="Override exp_cfg.rh_detector_recall (fraction of true positives flagged, default 1.0)")
+    parser.add_argument("--route_paid_only", action=argparse.BooleanOptionalAction, default=False,
+                        help="Route a monitor-flagged sample to FORGET only if it earned reward (raw reward > 0). "
+                             "Flagged samples that paid nothing (e.g. guard-blocked test overwrites) are treated as "
+                             "unflagged, so their negative advantage also updates RETAIN. Logs '[route_paid] ...' "
+                             "once per rollout. Default off (= GRAFT as published).")
     parser.add_argument("--detect_unhackable", action=argparse.BooleanOptionalAction, default=True,
                         help="Run the RH detector on unhackable samples too (default True). "
                              "Pass --no-detect_unhackable to restore the historical behavior of "
@@ -6833,6 +6853,7 @@ def _run(args, exp_cfg=None):
         save_adapter_only=args.save_adapter_only,
         forget_lr_mult=args.forget_lr_mult,
         detect_unhackable=args.detect_unhackable,
+        route_paid_only=args.route_paid_only,
     )
     trainer._environment = args.environment
     trainer._n_digits = args.n_digits

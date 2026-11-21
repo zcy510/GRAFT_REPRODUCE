@@ -15,6 +15,8 @@ Environment variables as in my_countdown_2gpu.py: CD_ARMS, CD_SEEDS, CD_STEPS, C
          >0 switches to configs/countdown_code_hack_guard.yaml and adds "_g<frac>" to the run name.
   CD_PROBE  1 = routing monitor = test-overwrite rule OR hidden-state probe
          (configs/countdown_code_hack_guard_probe.yaml; needs CD_GUARD=1.0); adds "_probe" to the run name.
+  CD_ROUTE_PAID  1 = route a flagged sample to FORGET only if it earned reward (--route_paid_only);
+         flagged attempts that paid 0 update RETAIN like unflagged ones. Needs CD_PROBE=1; adds "_paid".
   CD_RUNTAG suffix appended to every run name (default empty), e.g. "_mA" for design-A runs whose CD_MODEL
          is a merged checkpoint (tools/merge_adapters.py).
 Arms: gr = GRAFT; dn = no intervention (lr 5e-4, no anchors); nr = no-routing control: GRAFT's exact recipe
@@ -36,6 +38,8 @@ guard = float(os.environ.get("CD_GUARD", "0"))
 runtag = os.environ.get("CD_RUNTAG", "")
 probe = os.environ.get("CD_PROBE", "0") == "1"
 assert not probe or guard == 1.0, "CD_PROBE=1 is only set up for option C (CD_GUARD=1.0)"
+route_paid = os.environ.get("CD_ROUTE_PAID", "0") == "1"
+assert not route_paid or probe, "CD_ROUTE_PAID=1 is only set up for the probe experiment (CD_PROBE=1)"
 assert 0.0 <= guard <= 1.0, guard
 
 HPC = {
@@ -51,6 +55,8 @@ if guard > 0:                        # option C: grader guard (same reward other
     HPC.update({"countdown_guard_frac": guard, "config": "configs/countdown_code_hack_guard.yaml"})
 if probe:                            # probe experiment: only the routing monitor changes
     HPC["config"] = "configs/countdown_code_hack_guard_probe.yaml"
+if route_paid:                       # route-if-paid: flagged samples with reward 0 are not routed
+    HPC["route_paid_only"] = True
 if steps < 50:                       # smoke test: evaluate often, never checkpoint
     HPC.update({"eval_every": 2, "save_steps": 100000})
 
@@ -60,7 +66,7 @@ for arm in arms:
         r = {**ARMS[arm], **HPC, "seed": s}
         r["run_name"] = (f"cd_{arm}_gh200x1_st{steps}_s{s}" + ("" if gc else "_nogc")
                          + ("" if layout == "canonical" else f"_{layout}")
-                         + ("" if guard == 0 else f"_g{guard:g}") + ("_probe" if probe else "") + runtag)
+                         + ("" if guard == 0 else f"_g{guard:g}") + ("_probe" if probe else "") + ("_paid" if route_paid else "") + runtag)
         runs.append(r)
 
 gpus_per_run = 1
