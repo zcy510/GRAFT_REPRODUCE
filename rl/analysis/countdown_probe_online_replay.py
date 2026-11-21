@@ -8,8 +8,9 @@ Two threshold rules (A4), reported side by side wherever a probe is fitted:
            and both can be computed during training from the run's own data)
 
 A  online replay: for each canonical run separately, refit on that run's answers (mode both) with step <= t.
-A2 learning curve: fit on random subsets of n answers from ALL canonical answers (3 runs x 3 modes), n = 128 ...
-   all, 5 repeats each: how many answers does the probe need?
+A2 learning curve: fit on random subsets of n answers from a pool of canonical answers, n = 128 ... all,
+   5 repeats each: how many answers does the probe need? Pools (--a2_pools): "all" = 3 runs x 3 modes;
+   "both" = 3 runs, training-policy answers only (mode both), i.e. the only kind an online probe gets from rollouts.
 A3 diversity at equal n: (one run, mode both) vs (one run, all modes) vs (3 runs, mode both) vs (3 runs, all
    modes), each subsampled to the same n: is it the amount of data or its variety?
 B  threshold check for modify_input: the offline probe (all canonical answers), thresholds by a false-alarm budget
@@ -126,11 +127,12 @@ def part_A(ctx, X):
     return out
 
 
-def part_A2(ctx, X, rng):
+def part_A2(ctx, X, rng, pool_name="all"):
     a, out = ctx.a, {}
-    pool = np.nonzero(ctx.tr)[0]
+    pool = np.nonzero(ctx.tr & ((ctx.mode == "both") if pool_name == "both" else True))[0]
+    desc = "3 runs x 3 modes" if pool_name == "all" else "3 runs, mode both only = training-policy answers"
     sizes = [n for n in a.sizes if n < len(pool)] + [len(pool)]
-    print(f"\nA2. learning curve: random subsets of ALL canonical answers (3 runs x 3 modes, {len(pool)} total), "
+    print(f"\nA2 [{pool_name}]. learning curve: random subsets of canonical answers ({desc}, {len(pool)} total), "
           f"{a.repeats} repeats (1 for 'all'); mean over repeats, sd of c_relax in brackets")
     print(f"   {'n':>6s} {'flag':>6s} {HDR0}\n   {'':6s} {'':6s} {HDR}   sd c_relax rec97 / unf1")
     for n in sizes:
@@ -198,6 +200,7 @@ def main():
     ap.add_argument("--parts", nargs="+", default=["A", "A2", "A3", "B"])
     ap.add_argument("--cutoffs", nargs="+", type=int, default=[0, 12, 24, 36, 48, 72, 96, 144, 192])
     ap.add_argument("--sizes", nargs="+", type=int, default=[128, 256, 512, 1024, 2048, 4096])
+    ap.add_argument("--a2_pools", nargs="+", default=["all", "both"], choices=["all", "both"])
     ap.add_argument("--a3_n", type=int, default=1024, help="A3 subsample size (capped by the smallest source)")
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--min_pos", type=int, default=5, help="need at least this many flagged and unflagged answers")
@@ -215,7 +218,8 @@ def main():
         X = ctx.D[f"feats_L{layer}"].astype(np.float32)
         print(f"\n===== layer {layer}"); lrep = {}
         if "A" in a.parts and layer in a.layers: lrep["A_replay"] = part_A(ctx, X)
-        if "A2" in a.parts and layer in a.curve_layers: lrep["A2_curve"] = part_A2(ctx, X, rng)
+        if "A2" in a.parts and layer in a.curve_layers:
+            lrep["A2_curve"] = {p: part_A2(ctx, X, rng, p) for p in a.a2_pools}
         if "A3" in a.parts and layer in a.curve_layers: lrep["A3_diversity"] = part_A3(ctx, X, rng)
         if "B" in a.parts and layer in a.layers: lrep["B_threshold"] = part_B(ctx, X)
         rep["layers"][layer] = lrep

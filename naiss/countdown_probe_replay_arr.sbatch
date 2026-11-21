@@ -12,12 +12,15 @@
 # runs on the aarch64 GPU nodes): (A) online replay on each canonical run's own rule flags, (A2) learning curve,
 # (A3) data diversity, with two threshold rules (A4), all tested
 # on option C; (B) threshold check for modify_input. See analysis/countdown_probe_online_replay.py.
-# Submit from ~/GRAFT:  sbatch naiss/countdown_probe_replay_arr.sbatch [npz name, default cd_canon2guard_v1]
+# Submit from ~/GRAFT:  sbatch naiss/countdown_probe_replay_arr.sbatch [npz name, default cd_canon2guard_v1] [extra args]
+#   e.g. only the learning curve on training-policy answers, to its own json:
+#   sbatch naiss/countdown_probe_replay_arr.sbatch cd_canon2guard_v1 --parts A2 --a2_pools both \
+#          --out output/probes/cd_canon2guard_v1_a2both.json
 # Output: the log + rl/output/probes/<name>_online_replay.json
 set -e
 NAME=${1:-cd_canon2guard_v1}
 echo "Job $SLURM_JOB_ID on $(hostname): $NAME, start $(date)"
 cd ~/GRAFT/rl
 test -f output/probes/$NAME.npz || { echo "missing output/probes/$NAME.npz"; exit 1; }
-bash ~/GRAFT/naiss/run_arr.sh python -u analysis/countdown_probe_online_replay.py output/probes/$NAME.npz --layers 27 -1 --curve_layers 27
+bash ~/GRAFT/naiss/run_arr.sh python -u analysis/countdown_probe_online_replay.py output/probes/$NAME.npz --layers 27 -1 --curve_layers 27 "${@:2}"
 echo "End $(date)"
