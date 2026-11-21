@@ -13,6 +13,10 @@ A2 learning curve: fit on random subsets of n answers from a pool of canonical a
    "both" = 3 runs, training-policy answers only (mode both), i.e. the only kind an online probe gets from rollouts.
 A3 diversity at equal n: (one run, mode both) vs (one run, all modes) vs (3 runs, mode both) vs (3 runs, all
    modes), each subsampled to the same n: is it the amount of data or its variety?
+A5 which extra data carries the value? At equal n: training-policy answers (mode both) alone, + RETAIN-only,
+   + FORGET-only, RETAIN-only + FORGET-only (no training-policy answers), all modes, and training-policy answers
+   STEP-MATCHED (per run and eval step, as many unflagged as flagged answers, so the label cannot be read off
+   the training stage: tests the time confound).
 B  threshold check for modify_input: the offline probe (all canonical answers), thresholds by a false-alarm budget
    on the option C clean answers themselves (a diagnostic: ranking vs threshold, not usable in training).
 
@@ -22,7 +26,7 @@ answers in modes both / forget_only at steps >= 132, after its FORGET collapse (
 768 answers; the saved probe included them, and refitting without them changed nothing: c_relax 82.8 -> 82.2%).
 
 usage (from rl/): python analysis/countdown_probe_online_replay.py output/probes/cd_canon2guard_v1.npz
-         [--layers 27 -1] [--curve_layers 27] [--parts A A2 A3 B] [--repeats 5] [--out F.json]
+         [--layers 27 -1] [--curve_layers 27] [--parts A A2 A3 A5 B] [--repeats 5] [--out F.json]
 """
 import argparse, json, os
 import numpy as np
@@ -170,6 +174,36 @@ def part_A3(ctx, X, rng):
     return out
 
 
+def part_A5(ctx, X, rng):
+    a, out = ctx.a, {}
+    base = ctx.tr
+    m = lambda *modes: np.nonzero(base & np.isin(ctx.mode, list(modes)))[0]
+    # step-matched training-policy answers: per (run, step), all flagged + an equal number of random unflagged
+    matched = []
+    both = base & (ctx.mode == "both")
+    for r in sorted(set(ctx.run[both])):
+        for st in sorted(set(ctx.step[both & (ctx.run == r)])):
+            cell = np.nonzero(both & (ctx.run == r) & (ctx.step == st))[0]
+            f, u = cell[ctx.y[cell]], cell[~ctx.y[cell]]
+            k = min(len(f), len(u))
+            if k:
+                matched += list(rng.choice(f, k, replace=False)) + list(rng.choice(u, k, replace=False))
+    src = {"training policy (both)": m("both"), "both + RETAIN-only": m("both", "retain_only"),
+           "both + FORGET-only": m("both", "forget_only"), "RETAIN-only + FORGET-only": m("retain_only", "forget_only"),
+           "all modes": m("both", "retain_only", "forget_only"), "both, step-matched": np.array(matched)}
+    n = min(a.a5_n, min(len(p) for p in src.values()))
+    print(f"\nA5. which extra data carries the value? equal n = {n}, {a.repeats} repeats each "
+          f"(pool sizes: " + ", ".join(f"{k} {len(v)}" for k, v in src.items()) + ")")
+    print(f"   {'source':26s} {'flag':>6s} {HDR0}\n   {'':26s} {'':6s} {HDR}")
+    for name, pool in src.items():
+        rows = [ctx.evaluate(X, idx) for idx in (sample(ctx, pool, n, rng) for _ in range(a.repeats)) if idx is not None]
+        if not rows:
+            print(f"   {name:26s} -"); continue
+        mm = mean_rows(rows); out[name] = mm
+        print(f"   {name:26s} {mm['n_flag']:6.0f} {row_str(mm)}")
+    return out
+
+
 def part_B(ctx, X):
     idx = np.nonzero(ctx.tr)[0]; y = ctx.y[idx]
     clf = LogisticRegression(max_iter=5000, class_weight="balanced").fit(X[idx], y)
@@ -201,6 +235,7 @@ def main():
     ap.add_argument("--cutoffs", nargs="+", type=int, default=[0, 12, 24, 36, 48, 72, 96, 144, 192])
     ap.add_argument("--sizes", nargs="+", type=int, default=[128, 256, 512, 1024, 2048, 4096])
     ap.add_argument("--a2_pools", nargs="+", default=["all", "both"], choices=["all", "both"])
+    ap.add_argument("--a5_n", type=int, default=1024, help="A5 subsample size (capped by the smallest source)")
     ap.add_argument("--a3_n", type=int, default=1024, help="A3 subsample size (capped by the smallest source)")
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--min_pos", type=int, default=5, help="need at least this many flagged and unflagged answers")
@@ -221,6 +256,7 @@ def main():
         if "A2" in a.parts and layer in a.curve_layers:
             lrep["A2_curve"] = {p: part_A2(ctx, X, rng, p) for p in a.a2_pools}
         if "A3" in a.parts and layer in a.curve_layers: lrep["A3_diversity"] = part_A3(ctx, X, rng)
+        if "A5" in a.parts and layer in a.curve_layers: lrep["A5_modes"] = part_A5(ctx, X, rng)
         if "B" in a.parts and layer in a.layers: lrep["B_threshold"] = part_B(ctx, X)
         rep["layers"][layer] = lrep
     out = a.out or os.path.splitext(a.npz)[0] + "_online_replay.json"
