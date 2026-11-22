@@ -18,7 +18,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 RL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RL)
-from probe_features import backbone_hidden_features, countdown_prompt_text  # noqa: E402
+from probe_features import backbone_hidden_features, backbone_part_features, countdown_prompt_text  # noqa: E402
 
 LAB = {"flagged": "detected_freq", "test_overwrite": "hack_freq_detectable", "constraint_relax": "hack_freq_constraint_relax",
        "modify_input": "hack_freq_modify_input", "other": "hack_freq_other", "hack": "hack_freq",
@@ -41,6 +41,9 @@ def main():
     ap.add_argument("--modes", nargs="+", default=["both", "retain_only", "forget_only"])
     ap.add_argument("--token_budget", type=int, default=32768)
     ap.add_argument("--limit", type=int, default=0, help="smoke test: first N answers per file")
+    ap.add_argument("--parts", nargs="+", default=None,
+                    help="also/instead pool per part (probe_features.COUNTDOWN_PARTS: all reasoning answer solution test);"
+                         " writes feats_L<layer>_<part> and has_<part>")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     files = find_files(a.runs)
@@ -74,10 +77,19 @@ def main():
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(a.base_model, torch_dtype=torch.bfloat16, attn_implementation="sdpa").to(dev).eval()
     print(f"[feat] {len(rows)} answers, layers {a.layers} of {model.config.num_hidden_layers}, model {a.base_model}", flush=True)
-    feats = backbone_hidden_features(model, tok, [p for p, _ in rows], [c for _, c in rows], layers=a.layers,
-                                     token_budget=a.token_budget, log_every=50)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    np.savez(a.out, **{f"feats_L{l}": feats[l].astype(np.float16) for l in a.layers},
+    extra = {}
+    if a.parts:
+        pf, present = backbone_part_features(model, tok, [p for p, _ in rows], [c for _, c in rows], layers=a.layers,
+                                             parts=a.parts, token_budget=a.token_budget, log_every=50)
+        extra = {**{f"feats_L{l}_{part}": v.astype(np.float16) for (l, part), v in pf.items()},
+                 **{f"has_{part}": v for part, v in present.items()}, "parts": np.array(a.parts)}
+        print("[feat] parts present: " + ", ".join(f"{k} {int(v.sum())}/{len(v)}" for k, v in present.items()), flush=True)
+        feats = {l: pf[(l, "all")] for l in a.layers} if "all" in a.parts else {}
+    else:
+        feats = backbone_hidden_features(model, tok, [p for p, _ in rows], [c for _, c in rows], layers=a.layers,
+                                         token_budget=a.token_budget, log_every=50)
+    np.savez(a.out, **{f"feats_L{l}": feats[l].astype(np.float16) for l in feats}, **extra,
              **{k: np.array(v) for k, v in meta.items()}, layers=np.array(a.layers), base_model=a.base_model)
     print(f"[feat] wrote {a.out}", flush=True)
 

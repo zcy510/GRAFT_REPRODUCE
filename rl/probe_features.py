@@ -111,3 +111,104 @@ def truncate_backbone(model, layer):
     if getattr(bb.config, "layer_types", None):
         bb.config.layer_types = list(bb.config.layer_types)[:keep]
     return bb
+
+
+# ---------------------------------------------------------------- per-part pooling (Countdown, 2026-11-22)
+COUNTDOWN_PARTS = ("all", "reasoning", "answer", "solution", "test")
+
+
+def _json_string_value_span(text, key, start):
+    """Character span of the value of the LAST `"key": "..."` in text[start:] (JSON string, escapes skipped)."""
+    import re
+    ms = list(re.finditer(r'"%s"\s*:\s*"' % re.escape(key), text[start:]))
+    if not ms:
+        return None
+    b = i = start + ms[-1].end()
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == '"':
+            return (b, i)
+        i += 1
+    return (b, len(text))
+
+
+def countdown_part_spans(completion):
+    """Character spans of the parts of a Countdown answer: reasoning (before the last </think>), answer (after it),
+    solution / test (the values of "solution.py" / "test.py" in the final answer JSON), all. None = part absent.
+    Without </think> (e.g. cut at the length limit) everything counts as reasoning."""
+    n = len(completion)
+    k = completion.rfind("</think>")
+    if k < 0:
+        sp = {"all": (0, n), "reasoning": (0, n), "answer": None, "solution": None, "test": None}
+    else:
+        a0 = k + len("</think>")
+        sp = {"all": (0, n), "reasoning": (0, k) if k > 0 else None, "answer": (a0, n) if a0 < n else None,
+              "solution": _json_string_value_span(completion, "solution.py", a0),
+              "test": _json_string_value_span(completion, "test.py", a0)}
+    return sp
+
+
+@torch.no_grad()
+def backbone_part_features(model, tok, prompts, completions, layers=(27,), parts=COUNTDOWN_PARTS, token_budget=32768,
+                           device=None, log_every=0):
+    """Like backbone_hidden_features, but mean-pools each PART of the completion separately (countdown_part_spans;
+    a completion token belongs to a part if its character span overlaps it). Returns ({(layer, part): [N, hidden]
+    float32, L2-normalised, zeros where the part is absent}, {part: [N] bool present}). Part "all" = all completion
+    tokens = exactly backbone_hidden_features."""
+    device = device or next(model.parameters()).device
+    backbone = getattr(model, "model", model)
+    pad = tok.pad_token_id if tok.pad_token_id is not None else tok.eos_token_id
+    seqs, pmasks = [], []
+    for p, c in zip(prompts, completions):
+        p_ids = tok(p, add_special_tokens=False).input_ids
+        enc = tok(c, add_special_tokens=False, return_offsets_mapping=True)
+        c_ids, offs = enc.input_ids, enc.offset_mapping
+        if not c_ids:
+            c_ids, offs = [tok.eos_token_id], [(0, 0)]
+        sp = countdown_part_spans(c)
+        pm = {}
+        for part in parts:
+            span = sp[part]
+            if span is None:
+                pm[part] = np.zeros(len(c_ids), bool)
+            elif part == "all":
+                pm[part] = np.ones(len(c_ids), bool)
+            else:
+                pm[part] = np.array([(o[0] < span[1] and o[1] > span[0]) for o in offs], bool)
+        seqs.append((p_ids + c_ids, len(p_ids))); pmasks.append(pm)
+    order = sorted(range(len(seqs)), key=lambda i: len(seqs[i][0]))
+    batches, cur = [], []
+    for i in order:
+        if cur and len(seqs[i][0]) * (len(cur) + 1) > token_budget:
+            batches.append(cur); cur = []
+        cur.append(i)
+    if cur:
+        batches.append(cur)
+    H = model.config.hidden_size
+    out = {(l, part): np.zeros((len(seqs), H), np.float32) for l in layers for part in parts}
+    present = {part: np.array([pm[part].any() for pm in pmasks]) for part in parts}
+    for b, idx in enumerate(batches):
+        L = max(len(seqs[i][0]) for i in idx)
+        ids = torch.full((len(idx), L), pad, dtype=torch.long)
+        att = torch.zeros((len(idx), L), dtype=torch.long)
+        masks = {part: torch.zeros((len(idx), L), dtype=torch.float32) for part in parts}
+        for j, i in enumerate(idx):
+            s, P = seqs[i]
+            ids[j, :len(s)] = torch.tensor(s); att[j, :len(s)] = 1
+            for part in parts:
+                masks[part][j, P:len(s)] = torch.from_numpy(pmasks[i][part].astype(np.float32))
+        hs = backbone(input_ids=ids.to(device), attention_mask=att.to(device), output_hidden_states=True,
+                      use_cache=False).hidden_states
+        for part in parts:
+            m = masks[part].to(device)[..., None]
+            has = (m.sum(1) > 0).squeeze(-1).cpu().numpy()
+            for l in layers:
+                feat = torch.nn.functional.normalize((hs[l].float() * m).sum(1) / m.sum(1).clamp(min=1), dim=-1)
+                arr = feat.cpu().numpy(); arr[~has] = 0.0
+                out[(l, part)][idx] = arr
+        del hs
+        if log_every and (b % log_every == 0 or b == len(batches) - 1):
+            print(f"[feat] batch {b + 1}/{len(batches)} (n={len(idx)}, len={L})", flush=True)
+    return out, present
