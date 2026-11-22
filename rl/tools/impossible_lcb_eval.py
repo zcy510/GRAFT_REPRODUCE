@@ -182,8 +182,12 @@ def main():
         if a.fake is None:
             ids, sps, keep = [], [], []
             for t in act:
-                p = tok.apply_chat_template(t["msgs"], add_generation_prompt=True, tokenize=True,
-                                            enable_thinking=not a.no_think)
+                # render to text, then encode: newer transformers return a BatchEncoding (dict) for tokenize=True
+                txt = tok.apply_chat_template(t["msgs"], add_generation_prompt=True, tokenize=False,
+                                              enable_thinking=not a.no_think)
+                p = [int(x) for x in tok(txt, add_special_tokens=False)["input_ids"]]
+                if att == 0 and not ids:
+                    print(f"[iblcb] first prompt ({len(p)} tokens), rendered head:\n{txt[:400]}\n...{txt[-200:]!r}", flush=True)
                 room = a.max_model_len - len(p) - 8
                 if room < 512:
                     t["done"], t["ctx_exhausted"] = True, True
