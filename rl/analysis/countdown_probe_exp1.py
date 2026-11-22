@@ -61,6 +61,9 @@ def train_log(tag, s):
                      "true": 100 * kv.get("countdown_true_from_all", 0)})
     pr = [dict(n=int(n), rule=int(a), probe=int(b), only=int(c), tot=int(d), sec=float(e), gib=float(f)) for n, a, b, c, d, e, f in
           re.findall(r"\[probe\] n=(\d+) rule_flags=(\d+) probe_flags=(\d+) probe_only=(\d+) total_flagged=(\d+) thr=[0-9.]+ probe_sec=([0-9.]+) torch_peak_GiB=([0-9.]+)", log)]
+    pr += [dict(n=int(n), rule=int(a), probe=int(b), only=int(c), tot=int(d), sec=float(e), gib=0.0) for n, a, b, c, d, e in
+           re.findall(r"\[oprobe\] n=(\d+) step=\S+ rule=(\d+) attempts=\d+ probe_flags=(\d+) probe_only=(\d+) total_flagged=(\d+) "
+                      r"active=\S+ learning=\S+ sec=([0-9.]+)", log)]                # online-probe runs
     big = [p for p in pr if p["n"] == 1024]
     for r, p in zip(roll, big):
         r.update(flag=100 * p["tot"] / p["n"], rule=100 * p["rule"] / p["n"], probe_only=100 * p["only"] / p["n"])
@@ -72,7 +75,7 @@ def main():
     print("== 1. fseval, step 200, n = 256 (%): deployed = forget 0 for GRAFT runs, forget 1 (trained policy) for dn")
     print(f"{'run':10s} {'seed':>4s} {'forget':>6s} " + " ".join(f"{k:>13s}" for k in K))
     summ = {}
-    for tag in ("gr", "grprobe", "grprobepaid", "groprobe", "groprobewarm", "dn"):
+    for tag in ("gr", "grprobe", "grprobepaid", "groprobe", "groprobewarm", "groprobeparts", "groprobepartswarm", "dn"):
         for s in SEEDS:
             f = fseval(tag, s)
             if not f:
@@ -90,7 +93,7 @@ def main():
     print("\n== 2. monitor (rule OR probe) on the training policy's eval answers (mode both, 64 prompts / eval step)")
     print("   share of each answer type the monitor flagged, pooled over 3 seeds; n in brackets")
     bins = [(0, 48), (60, 108), (120, 192)]
-    for tag in ("grprobe", "grprobepaid", "groprobe", "groprobewarm", "gr"):
+    for tag in ("grprobe", "grprobepaid", "groprobe", "groprobewarm", "groprobeparts", "groprobepartswarm", "gr"):
         if all(run_dir(tag, s) is None for s in SEEDS):
             continue
         print(f"  {tag}:")
@@ -104,7 +107,7 @@ def main():
             print(f"    steps {lo:3d}-{hi:3d}: " + "  ".join(f"{t} {100*mean(v):5.1f}% ({len(v)})" for t, v in sorted(agg.items())))
 
     print("\n== 3. training rollouts (1,024 task samples each): flagged share vs grader hack shares (%)")
-    for tag, s in [(t, s) for t in ("grprobe", "grprobepaid", "groprobe", "groprobewarm") for s in SEEDS if run_dir(t, s)]:
+    for tag, s in [(t, s) for t in ("grprobe", "grprobepaid", "groprobe", "groprobewarm", "groprobeparts", "groprobepartswarm") for s in SEEDS if run_dir(t, s)]:
         roll, pr, t = train_log(tag, s)
         print(f"  [{tag}]", end="")
         print(f"  seed {s} (train time {t}):")
@@ -113,6 +116,8 @@ def main():
                   f"{r.get('probe_only', float('nan')):5.1f}) | grader c_relax {r['c_relax']:5.1f} mod_input {r['mod_input']:4.1f} "
                   f"guard_blocked {r['guard_blocked']:4.1f} | true {r['true']:5.1f}")
         big = [p for p in pr if p["n"] == 1024]
+        if not big:
+            continue
         print(f"    probe calls on rollouts: {len(big)}, mean {mean(p['sec'] for p in big):.1f} s each, "
               f"total {sum(p['sec'] for p in pr)/60:.1f} min (all calls); torch peak {max(p['gib'] for p in pr):.1f} GiB")
 

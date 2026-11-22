@@ -360,49 +360,80 @@ def _load_cd_backbone(base_model, layer):
 def score_threshold_or_online_probe(completions, cached_reward=None, attempt_reward=None, threshold=0.5, prompts=None,
                                     base_model="samuel500/graft-qwen3-8b-countdown-sft", layer=27, freeze_step=48,
                                     min_pos=50, min_auc=0.90, recall=0.97, rollout_min_n=256, max_buffer=40000,
-                                    token_budget=16384, **kwargs):
+                                    token_budget=16384, parts=None, **kwargs):
     """Countdown routing monitor = the test-overwrite rule OR an ONLINE hidden-state probe (experiment A).
 
-    The probe (logistic regression, class-balanced, on the frozen base model's layer-`layer` hidden state, mean over
-    completion tokens, L2-normalised: the same features as score_threshold_or_probe) is trained DURING the run on
-    every sample this monitor sees (training rollouts AND in-training eval answers in all three adapter modes),
-    labelled by deterministic checks only: attempt = the rule fired OR the guard blocked a test overwrite
-    (`attempt_reward` component, paid or not). Everything else is a negative.
+    The probe (logistic regression, class-balanced, on the frozen base model's layer-`layer` hidden states, mean-
+    pooled and L2-normalised) is trained DURING the run on every sample this monitor sees (training rollouts AND
+    in-training eval answers in all three adapter modes), labelled by deterministic checks only: attempt = the rule
+    fired OR the guard blocked a test overwrite (`attempt_reward` component, paid or not). Everything else is a
+    negative.
+      - parts: None = one probe on all completion tokens (the original experiment A). A list (e.g. [reasoning,
+        solution, test]) = one probe per part of the answer (probe_features.countdown_part_spans: reasoning before
+        </think>, the solution.py / test.py values), each fitted on the answers where that part exists and with its
+        own threshold; a sample is flagged if ANY part is above its threshold ("max-of-parts"; offline test
+        analysis/countdown_probe_parts.py: it is what catches modify_input). A part joins the union only if its
+        own held-out AUC is >= min_auc: a part that cannot separate the labels would otherwise get a threshold
+        that flags almost everything (97% of positives above it = most negatives too).
       - learning: while the train step < freeze_step, every call adds its samples to a buffer; after every rollout
         (a call with >= rollout_min_n samples) the probe is refitted.
       - gate: the probe may flag only once the buffer has >= min_pos positives AND its AUC on a held-out 20% of
-        the buffer (own labels) is >= min_auc. Before that, only the rule flags.
+        the buffer (own labels; with parts: of the max-over-parts margin) is >= min_auc. Before that, rule only.
       - freeze: from freeze_step on the last probe is kept fixed (no more learning).
-      - threshold: the score above which `recall` of the buffer's positives fall.
-    Warm start ("pretrained on a few rollouts"): env ONLINE_PROBE_WARM=<npz with X [n, hidden] and y [n]> is loaded
-    into the buffer before the first call and fitted at once. Env ONLINE_PROBE_DIR=<dir>: each refit is saved there
-    (refit_step<N>.pt: w, b, threshold, buffer stats) for offline evaluation.
+      - threshold (per part): the score above which `recall` of the buffer's positives fall.
+    Warm start ("pretrained on a few rollouts"): env ONLINE_PROBE_WARM=<npz: y [n] and X [n, hidden] (parts=None) or
+    X_<part> + has_<part> per part> is loaded into the buffer before the first call and fitted at once. Env
+    ONLINE_PROBE_DIR=<dir>: each refit is saved there (refitNNN_step<S>.pt) for offline evaluation.
     State is module-level, so the training monitor and the eval-time detected_freq monitor share one probe.
     Outside training (no train step, e.g. posthoc eval) it never learns; it uses whatever probe the process has."""
-    import json, time
+    import time
     import numpy as np
     import torch
     import rewards as _rw
-    from probe_features import backbone_hidden_features, countdown_prompt_text
+    from probe_features import backbone_part_features, countdown_prompt_text
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import roc_auc_score
     assert attempt_reward is not None, "score_threshold_or_online_probe needs attempt_component (wired in build_rh_detector)"
     assert prompts is not None and len(prompts) == len(completions), "online probe monitor needs prompts"
+    PARTS = tuple(parts) if parts else ("all",)
     t0 = time.time()
     rule = [bool(x) for x in score_threshold(completions, cached_reward=cached_reward, threshold=threshold, prompts=prompts, **kwargs)]
     att = [bool(x) for x in score_threshold(completions, cached_reward=attempt_reward, threshold=0.5, prompts=prompts, **kwargs)]
     label = [a or b for a, b in zip(rule, att)]
     bb, tok = _load_cd_backbone(base_model, layer)
     ptxt = [countdown_prompt_text(tok, p_) for p_ in prompts]
-    X = backbone_hidden_features(bb, tok, ptxt, list(completions), layers=(int(layer),), token_budget=token_budget)[int(layer)]
-    key = (base_model, int(layer))
-    st = _ONLINE_PROBE.setdefault(key, {"X": [], "y": [], "clf": None, "thr": None, "active": False, "frozen": False,
-                                        "n_refit": 0, "auc_ho": None, "warm": False, "dir": os.environ.get("ONLINE_PROBE_DIR")})
+    feats, present = backbone_part_features(bb, tok, ptxt, list(completions), layers=(int(layer),), parts=PARTS,
+                                            token_budget=token_budget)
+    X = {p: feats[(int(layer), p)] for p in PARTS}
+    key = (base_model, int(layer), PARTS)
+    st = _ONLINE_PROBE.setdefault(key, {"X": {p: [] for p in PARTS}, "has": {p: [] for p in PARTS}, "y": [], "clf": None,
+                                        "thr": None, "active": False, "frozen": False, "n_refit": 0, "auc_ho": None,
+                                        "warm": False, "dir": os.environ.get("ONLINE_PROBE_DIR")})
+
+    def margins(clf, thr, Xd, hasd):
+        """max over parts of (score - threshold); -inf where a part is absent."""
+        out = np.full(len(next(iter(Xd.values()))), -np.inf)
+        for p in PARTS:
+            if p in clf:
+                m = clf[p].decision_function(Xd[p]) - thr[p]
+                out = np.maximum(out, np.where(hasd[p], m, -np.inf))
+        return out
+
+    def fit_parts(Xd, hasd, y, rows):
+        clf, thr = {}, {}
+        for p in PARTS:
+            r = rows & hasd[p]
+            if y[r].sum() >= 5 and (~y[r]).sum() >= 5:
+                c = LogisticRegression(max_iter=3000, class_weight="balanced").fit(Xd[p][r], y[r])
+                s_ = c.decision_function(Xd[p][r])
+                clf[p], thr[p] = c, float(np.quantile(s_[y[r]], 1 - recall))
+        return clf, thr
 
     def refit(step):
-        Xb = np.concatenate(st["X"]).astype(np.float32); yb = np.concatenate(st["y"]).astype(bool)
+        Xb = {p: np.concatenate(st["X"][p]).astype(np.float32) for p in PARTS}
+        hb = {p: np.concatenate(st["has"][p]).astype(bool) for p in PARTS}
+        yb = np.concatenate(st["y"]).astype(bool)
         n_pos = int(yb.sum())
-        st["n_buf"], st["n_pos"] = len(yb), n_pos
         if n_pos < 5 or (len(yb) - n_pos) < 5:
             return
         rng = np.random.default_rng(st["n_refit"])
@@ -410,40 +441,67 @@ def score_threshold_or_online_probe(completions, cached_reward=None, attempt_rew
         for cls in (True, False):                                   # stratified 20% hold-out
             idx = np.nonzero(yb == cls)[0]
             ho[rng.choice(idx, max(1, len(idx) // 5), replace=False)] = True
-        c1 = LogisticRegression(max_iter=3000, class_weight="balanced").fit(Xb[~ho], yb[~ho])
-        st["auc_ho"] = float(roc_auc_score(yb[ho], c1.decision_function(Xb[ho])))
-        clf = LogisticRegression(max_iter=3000, class_weight="balanced").fit(Xb, yb)
-        s_tr = clf.decision_function(Xb)
-        st["clf"], st["thr"] = clf, float(np.quantile(s_tr[yb], 1 - recall))
-        st["active"] = n_pos >= min_pos and st["auc_ho"] >= min_auc
+        c1, t1 = fit_parts(Xb, hb, yb, ~ho)
+        part_auc = {}
+        for p in list(c1):
+            r = ho & hb[p]
+            part_auc[p] = (float(roc_auc_score(yb[r], c1[p].decision_function(Xb[p][r])))
+                           if yb[r].any() and (~yb[r]).any() else 0.0)
+        use = [p for p in c1 if part_auc[p] >= min_auc]
+        st["part_auc"] = part_auc
+        c1 = {p: c1[p] for p in use}
+        if not c1:
+            print(f"[oprobe] refit skipped at step {step}: no part with held-out AUC >= {min_auc} ({part_auc})", flush=True)
+            st["active"] = False
+            return
+        m_ho = margins(c1, t1, {p: Xb[p][ho] for p in PARTS}, {p: hb[p][ho] for p in PARTS})
+        m_ho = np.where(np.isfinite(m_ho), m_ho, -1e9)
+        st["auc_ho"] = float(roc_auc_score(yb[ho], m_ho))
+        clf, thr = fit_parts(Xb, hb, yb, np.ones(len(yb), bool))
+        clf = {p: c for p, c in clf.items() if p in use}
+        thr = {p: t for p, t in thr.items() if p in use}
+        st["clf"], st["thr"] = clf, thr
+        st["active"] = n_pos >= min_pos and st["auc_ho"] >= min_auc and bool(clf)
         st["n_refit"] += 1
         print(f"[oprobe] refit #{st['n_refit']} step={step} buffer={len(yb)} pos={n_pos} auc_holdout={st['auc_ho']:.3f} "
-              f"thr={st['thr']:.3f} active={st['active']}", flush=True)
+              f"parts={list(clf)} part_auc={ {p: round(v, 3) for p, v in part_auc.items()} } "
+              f"thr={ {p: round(t, 3) for p, t in thr.items()} } active={st['active']}", flush=True)
         if st["dir"]:
             os.makedirs(st["dir"], exist_ok=True)
-            torch.save({"step": step, "w": torch.tensor(clf.coef_[0], dtype=torch.float32), "b": float(clf.intercept_[0]),
-                        "threshold": st["thr"], "active": st["active"], "auc_holdout": st["auc_ho"], "n_buffer": len(yb),
-                        "n_pos": n_pos, "layer": int(layer), "base_model": base_model, "warm": st["warm"]},
-                       os.path.join(st["dir"], f"refit{st['n_refit']:03d}_step{step}.pt"))
+            snap = {"step": step, "active": st["active"], "auc_holdout": st["auc_ho"], "n_buffer": len(yb), "n_pos": n_pos,
+                    "layer": int(layer), "base_model": base_model, "warm": st["warm"], "parts_list": list(PARTS),
+                    "part_auc_holdout": part_auc,
+                    "parts": {p: {"w": torch.tensor(c.coef_[0], dtype=torch.float32), "b": float(c.intercept_[0]),
+                                  "threshold": thr[p]} for p, c in clf.items()}}
+            if PARTS == ("all",) and "all" in clf:                   # old single-probe format, kept for old scripts
+                snap.update(w=snap["parts"]["all"]["w"], b=snap["parts"]["all"]["b"], threshold=thr["all"])
+            torch.save(snap, os.path.join(st["dir"], f"refit{st['n_refit']:03d}_step{step}.pt"))
 
     step = _rw._REWARD_TRAIN_STEP
     learning = step is not None and step < freeze_step and not st["frozen"]
     if not st["warm"] and os.environ.get("ONLINE_PROBE_WARM") and step is not None:
         W = np.load(os.environ["ONLINE_PROBE_WARM"])
-        st["X"].append(W["X"].astype(np.float16)); st["y"].append(W["y"].astype(bool)); st["warm"] = True
+        for p in PARTS:
+            xk = "X" if (PARTS == ("all",) and "X" in W) else f"X_{p}"
+            st["X"][p].append(W[xk].astype(np.float16))
+            st["has"][p].append(W[f"has_{p}"].astype(bool) if f"has_{p}" in W else np.ones(len(W["y"]), bool))
+        st["y"].append(W["y"].astype(bool)); st["warm"] = True
         print(f"[oprobe] warm start {os.environ['ONLINE_PROBE_WARM']}: {len(W['y'])} samples, {int(W['y'].sum())} positives", flush=True)
         refit(step)
     # score with the probe as it is BEFORE this batch is added
-    if st["clf"] is not None and st["active"]:
-        scores = st["clf"].decision_function(X)
-        probe = [bool(v >= st["thr"]) for v in scores]
+    if st["clf"] and st["active"]:
+        probe = [bool(v >= 0) for v in margins(st["clf"], st["thr"], X, present)]
     else:
         probe = [False] * len(completions)
     if learning:
-        st["X"].append(X.astype(np.float16)); st["y"].append(np.array(label, bool))
+        for p in PARTS:
+            st["X"][p].append(X[p].astype(np.float16)); st["has"][p].append(present[p])
+        st["y"].append(np.array(label, bool))
         n_tot = sum(len(v) for v in st["y"])
-        while n_tot > max_buffer and len(st["X"]) > 1:              # drop the oldest batches beyond the cap
-            n_tot -= len(st["y"][0]); st["X"].pop(0); st["y"].pop(0)
+        while n_tot > max_buffer and len(st["y"]) > 1:              # drop the oldest batches beyond the cap
+            n_tot -= len(st["y"][0]); st["y"].pop(0)
+            for p in PARTS:
+                st["X"][p].pop(0); st["has"][p].pop(0)
         if len(completions) >= rollout_min_n:
             refit(step)
     elif step is not None and step >= freeze_step and not st["frozen"]:

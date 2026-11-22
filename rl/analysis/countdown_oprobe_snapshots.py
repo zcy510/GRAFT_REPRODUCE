@@ -18,6 +18,8 @@ from sklearn.metrics import roc_auc_score
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--npz", default="output/probes/cd_canon2guard_v1.npz")
 ap.add_argument("--snap_glob", default="output/probes/online_cd_guard1.0_groprobe*_s*")
+ap.add_argument("--parts_npz", default="output/probes/cd_canon2guard_parts_v1.npz",
+                help="per-part features, used for snapshots of the per-part probe (oprobeparts runs)")
 ap.add_argument("--offline", default="output/probes/cd_canon_L27_lr.pt")
 ap.add_argument("--out", default="output/probes/cd_oprobe_snapshots.json")
 a = ap.parse_args()
@@ -29,14 +31,33 @@ X = D["feats_L27"].astype(np.float32)
 seed_of = np.array([int(m.group(1)) if (m := re.search(r"^cd_guard.*_s(\d+)$", g)) else -1 for g in grp])
 
 
+PD = {}
+
+
+def part_feats():
+    if not PD:
+        Q = np.load(a.parts_npz, allow_pickle=False)
+        assert (Q["group"] == grp).all() and (Q["step"] == step).all() and (Q["mode"] == mode).all(), "row order differs"
+        for p in [str(x) for x in Q["parts"]]:
+            PD[p] = (Q[f"feats_L27_{p}"].astype(np.float32), Q[f"has_{p}"].astype(bool))
+    return PD
+
+
 def auc(pos, neg, s):
     m = pos | neg
     return float(roc_auc_score(pos[m].astype(int), s[m])) if pos.sum() and neg.sum() else None
 
 
-def grade(w, b, thr, seed):
+def grade(w, b, thr, seed, parts=None):
+    """parts: {part: (w, b, threshold)} for a per-part snapshot -> score = max over parts of score - threshold, thr 0."""
     te = (seed_of == seed) & (mode == "both")
-    s = X[te] @ w + b
+    if parts:
+        F = part_feats(); s = np.full(int(te.sum()), -1e9)
+        for p, (wp, bp, tp) in parts.items():
+            s = np.maximum(s, np.where(F[p][1][te], F[p][0][te] @ wp + bp - tp, -1e9))
+        thr = 0.0
+    else:
+        s = X[te] @ w + b
     mk = {"c_relax": L["constraint_relax"][te], "mod_in": L["modify_input"][te], "blocked": L["guard_blocked"][te],
           "clean": clean[te]}
     early = step[te] <= 48
@@ -61,7 +82,11 @@ for d in sorted(glob.glob(a.snap_glob)):
     rows = []
     for p in snaps:
         sn = torch.load(p, map_location="cpu", weights_only=False)
-        g = grade(sn["w"].numpy() if hasattr(sn["w"], "numpy") else np.asarray(sn["w"]), sn["b"], sn["threshold"], seed)
+        if "w" in sn:
+            g = grade(sn["w"].numpy() if hasattr(sn["w"], "numpy") else np.asarray(sn["w"]), sn["b"], sn["threshold"], seed)
+        else:                                                        # per-part probe
+            g = grade(None, None, None, seed, parts={q: (v["w"].numpy() if hasattr(v["w"], "numpy") else np.asarray(v["w"]),
+                                                         v["b"], v["threshold"]) for q, v in sn["parts"].items()})
         r = {"file": os.path.basename(p), "step": sn["step"], "active": sn["active"], "n_buffer": sn["n_buffer"],
              "n_pos": sn["n_pos"], "auc_holdout_own_labels": sn["auc_holdout"], **g}
         rows.append(r); fl = g["flagged"]

@@ -22,7 +22,8 @@ RUNS = {"canonical (paper setup)": ["output/cd_gr_s9-1101-1624", "output/cd_gr_s
 _PAID = [f"output/arrhenius/cd_guard1.0_grprobepaid_s{s}" for s in (9, 15, 16)]
 if all(glob.glob(f"{d}/*/eval_samples.jsonl") for d in _PAID):        # route-if-paid follow-up, once synced
     RUNS["option C, probe, route-if-paid"] = _PAID
-for _tag, _lab in [("groprobe", "option C, online probe"), ("groprobewarm", "option C, online probe, warm")]:
+for _tag, _lab in [("groprobe", "option C, online probe"), ("groprobewarm", "option C, online probe, warm"),
+                   ("groprobeparts", "option C, online parts probe"), ("groprobepartswarm", "option C, online parts, warm")]:
     _D = [f"output/arrhenius/cd_guard1.0_{_tag}_s{s}" for s in (9, 15, 16)]
     if all(glob.glob(f"{d}/*/eval_samples.jsonl") for d in _D):         # experiment A, once synced
         RUNS[_lab] = _D
