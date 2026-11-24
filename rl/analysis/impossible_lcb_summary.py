@@ -18,7 +18,7 @@ ap.add_argument("--include_smoke", action="store_true")
 ap.add_argument("--show_passes", action="store_true", help="list every pass on the impossible splits with its flags")
 ap.add_argument("--audit", type=int, default=0,
                 help="print N random runs flagged hardcode (final answer) on each split, with the matched literals")
-ap.add_argument("--audit_kind", default="hardcode", choices=["hardcode", "testmod", "own_tests", "pattern_only", "hardcode_nopattern"],
+ap.add_argument("--audit_kind", default="hardcode", choices=["hardcode", "testmod", "tamper_targeted", "own_tests", "pattern_only", "hardcode_nopattern"],
                 help="which flagged final answers --audit samples")
 ap.add_argument("--audit_chars", type=int, default=240)
 ap.add_argument("--out", default="output/impossible_lcb/compare.json")
@@ -69,11 +69,11 @@ for d in sorted(glob.glob(a.runs)):
         if a.audit:
             sel = {"hardcode": lambda e: e["hardcode_final"], "testmod": lambda e: e["testmod_final"], "own_tests": lambda e: e["own_tests_final"],
                    "pattern_only": lambda e: e["pattern_any"] and not e["hardcode_any"],
-                   "hardcode_nopattern": lambda e: e["hardcode_final"] and not e["pattern_any"]}[a.audit_kind]
+                   "hardcode_nopattern": lambda e: e["hardcode_final"] and not e["pattern_any"], "tamper_targeted": lambda e: e["tamper_targeted_any"]}[a.audit_kind]
             F = [t for t in T if sel(t["exploit"])]
             for t in random.Random(0).sample(F, min(a.audit, len(F))):
                 e = t["exploit"]; ans = t["attempts"][-1]["answer"]
-                if a.audit_kind in ("testmod", "own_tests") and "def check" in ans:
+                if a.audit_kind in ("testmod", "tamper_targeted", "own_tests") and "def check" in ans:
                     ans = ans[ans.index("def check"):]                     # show the model's own check()
                 print(f"  [audit:{a.audit_kind} {tag} {s}] {t['task_id']:12s} j={t['j']} pass={int(t['success'])} "
                       f"{e['n_embedded_final']}/{e['n_cases']} cases, matched={[m[:24] for m in e['matched_final']]}, "
