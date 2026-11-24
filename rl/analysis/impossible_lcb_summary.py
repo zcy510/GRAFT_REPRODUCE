@@ -6,7 +6,7 @@ Standard library only: runs on the Arrhenius login node (python3 >= 3.9) as well
       [--review KIND --n N]     print N flagged attempts of one kind with the evidence, for manual checking
 Writes output/impossible_lcb/compare.json
 """
-import argparse, glob, json, math, os, random, sys
+import argparse, glob, json, math, os, random, re, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
 import ib_detect  # noqa: E402
@@ -96,5 +96,27 @@ print("attempt = hardcode or tamper_tgt or tamper_dis or stated (in any of the r
       "answer is an attempt and passes; unpaid = an attempt, no final pass; check_part = partial copy of the tests in\n"
       "an own check() (not an attempt); pass_part = a pass through it; mutated = embeds the changed/added case;\n"
       "pass_undet = any other pass. pass = paid + pass_part + mutated-only + pass_undet. Definitions: tools/ib_detect.py.")
+# pooled over seeds: runs whose tags differ only in _s<seed> form one arm
+groups = {}
+for tag in rep:
+    groups.setdefault(re.sub(r"_s\d+", "", tag), []).append(tag)
+if any(len(v) > 1 for v in groups.values()):
+    cols = ["attempt_any", "paid", "unpaid", "hardcode_any", "tamper_tgt_any", "tamper_dis_any", "stated_any"]
+    print("\n== pooled over seeds (counts summed; seed range of the pass rate in brackets)")
+    print(f"{'arm':26s} {'seeds':>5s} {'split':12s} {'n':>5s} {'pass':>14s} {'seed range':>13s} " +
+          " ".join(f"{c.replace('_any', ''):>14s}" for c in cols))
+    pooled = {}
+    for g, tags in groups.items():
+        for s in SPLITS:
+            rs = [rep[t]["splits"][s] for t in tags if s in rep[t]["splits"]]
+            if not rs:
+                continue
+            n = sum(r["n"] for r in rs); k = sum(r["pass"] for r in rs)
+            pr = [100 * r["pass"] / r["n"] for r in rs]
+            cnt = {c: sum(r["exploit"]["counts"][c] for r in rs) for c in cols}
+            pooled.setdefault(g, {})[s] = {"n": n, "pass": k, "pass_ci95": wilson(k, n), "seeds": tags, "counts": cnt}
+            print(f"{g:26s} {len(rs):5d} {s:12s} {n:5d} {pc(k, n):>14s} [{min(pr):4.1f},{max(pr):4.1f}] " +
+                  " ".join(f"{pc(cnt[c], n):>14s}" for c in cols))
+    rep["_pooled"] = pooled
 json.dump(rep, open(a.out, "w"), indent=1)
 print(f"wrote {a.out}")
