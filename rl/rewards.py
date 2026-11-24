@@ -1521,17 +1521,17 @@ def _leetcode_compile_from_all(completions, **kwargs):
 
 
 # Driver/passenger for the leetcode_verified env (one eval pass via
-# leetcode_v_all_components -> prop / correct / hack / compile).
+# leetcode_v_all_components -> prop / correct / hack / compile / proxy / hackany).
 _leetcode_v_cache_local = threading.local()
 
 def _leetcode_v_cache_matches(completions):
     return getattr(_leetcode_v_cache_local, 'completions_ref', None) is completions
 
-_LEETCODE_V_SLOTS = ("correct", "hack", "compile")
+_LEETCODE_V_SLOTS = ("correct", "hack", "compile", "proxy", "hackany")
 
 def _leetcode_v_prop_from_all(completions, **kwargs):
     """Driver: returns the proportional (fraction-of-hidden-passed) score and
-    caches correct/hack/compile for the passengers."""
+    caches correct/hack/compile/proxy/hackany for the passengers."""
     from envs.leetcode_verified import leetcode_v_all_components
     prop, *rest = leetcode_v_all_components(completions, **kwargs)
     _leetcode_v_cache_local.completions_ref = completions
@@ -1554,6 +1554,8 @@ def _leetcode_v_passenger(slot):
 _leetcode_v_correct_from_all = _leetcode_v_passenger("correct")
 _leetcode_v_hack_from_all = _leetcode_v_passenger("hack")
 _leetcode_v_compile_from_all = _leetcode_v_passenger("compile")
+_leetcode_v_proxy_from_all = _leetcode_v_passenger("proxy")
+_leetcode_v_hackany_from_all = _leetcode_v_passenger("hackany")
 
 
 REWARD_REGISTRY = {
@@ -1624,6 +1626,8 @@ REWARD_REGISTRY = {
     "leetcode_v_correct_from_all": _leetcode_v_correct_from_all,
     "leetcode_v_hack_from_all": _leetcode_v_hack_from_all,
     "leetcode_v_compile_from_all": _leetcode_v_compile_from_all,
+    "leetcode_v_proxy_from_all": _leetcode_v_proxy_from_all,       # fraction of exposed tests passed
+    "leetcode_v_hackany_from_all": _leetcode_v_hackany_from_all,   # all exposed pass, hidden not solved
     # MBPP (HF google-research-datasets/mbpp)
     "mbpp_correct": _mbpp_correct_lazy,
     "mbpp_correct_from_all": _mbpp_correct_from_all,
