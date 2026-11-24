@@ -219,12 +219,20 @@ def _get_tags_lookup() -> dict[str, list[str]]:
     if _tags_by_id is not None:
         return _tags_by_id
     from datasets import load_dataset as hf_load
-    raw = hf_load("newfacade/LeetCodeDataset", split="train")
-    _tags_by_id = {row["question_id"]: row["tags"] for row in raw}
-    # Also check test split
-    raw_test = hf_load("newfacade/LeetCodeDataset", split="test")
-    for row in raw_test:
-        _tags_by_id[row["question_id"]] = row["tags"]
+    try:
+        raw = hf_load("newfacade/LeetCodeDataset", split="train")
+        tags = {row["question_id"]: row["tags"] for row in raw}
+        # Also check test split
+        raw_test = hf_load("newfacade/LeetCodeDataset", split="test")
+        for row in raw_test:
+            tags[row["question_id"]] = row["tags"]
+    except Exception as e:
+        # Offline compute nodes (HF_HUB_OFFLINE=1) cannot reach the tags dataset. Tags only feed the
+        # leetcode_feature_conditional detectors; every other caller (e.g. leetcode_verified's
+        # _load_eval_prompts) works with empty tags, so cache {} instead of crashing the run.
+        print(f"[leetcode] tags lookup unavailable ({e.__class__.__name__}: {e}); using empty tags")
+        tags = {}
+    _tags_by_id = tags
     return _tags_by_id
 
 
