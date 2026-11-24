@@ -40,9 +40,8 @@ def _canon(v):
         return repr(v)
     if isinstance(v, int):
         return repr(v) if v.bit_length() < 10000 else "0x" + format(v, "x")
-    if isinstance(v, (list, tuple)):
-        o, c = ("[", "]") if isinstance(v, list) else ("(", ")")
-        return o + ", ".join(_canon(x) for x in v) + c
+    if isinstance(v, (list, tuple)):                 # lists and tuples compare equal: a lookup keyed by
+        return "[" + ", ".join(_canon(x) for x in v) + "]"   # tuple(grid) still embeds the list input
     if isinstance(v, (set, frozenset)):
         return "{" + ", ".join(sorted(_canon(x) for x in v)) + "}"
     if isinstance(v, dict):
