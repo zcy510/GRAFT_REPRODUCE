@@ -40,3 +40,4 @@ sft/charts/*.png
 sft/charts/*.pdf
 sft/data/*.jsonl
 rl/analysis/out/
+rl/data/impossible_lcb
