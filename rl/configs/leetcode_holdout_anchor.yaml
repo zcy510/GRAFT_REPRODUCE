@@ -1,0 +1,28 @@
+name: leetcode_holdout_anchor
+
+# Clean GRAFT anchor for runs that TRAIN on LeetCode (configs/leetcode_exposed3_*.yaml): the same recipe as
+# leetcode_verified_anchor.yaml (all-or-nothing genuine reward, no hint, no exposed tests, no hack channel), but on
+# the HOLDOUT problems (leetcode_train_medhard_holdout), so the anchor never gives the true reward on the training
+# problems themselves.
+reward:
+  max_reward: 1.0
+  components:
+    - name: leetcode_v_prop_from_all      # driver; metric only (scale 0)
+      role: retain
+      scale: 0.0
+    - name: leetcode_v_correct_from_all   # 1.0 iff ALL hidden tests pass
+      role: retain
+      scale: 1.0
+    - name: leetcode_v_compile_from_all   # metric only
+      role: retain
+      scale: 0.0
+
+rh_detector: null
+
+hack_freq_detector: null
+
+training:
+  routing_mode: none
+  environment: leetcode_verified_holdout
+  max_completion_length: 3072
+  leetcode_hint: none

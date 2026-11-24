@@ -1527,7 +1527,7 @@ _leetcode_v_cache_local = threading.local()
 def _leetcode_v_cache_matches(completions):
     return getattr(_leetcode_v_cache_local, 'completions_ref', None) is completions
 
-_LEETCODE_V_SLOTS = ("correct", "hack", "compile", "proxy", "hackany")
+_LEETCODE_V_SLOTS = ("correct", "hack", "compile", "proxy", "hackany", "hcattempt", "hackany_g", "guard_blocked")
 
 def _leetcode_v_prop_from_all(completions, **kwargs):
     """Driver: returns the proportional (fraction-of-hidden-passed) score and
@@ -1556,6 +1556,9 @@ _leetcode_v_hack_from_all = _leetcode_v_passenger("hack")
 _leetcode_v_compile_from_all = _leetcode_v_passenger("compile")
 _leetcode_v_proxy_from_all = _leetcode_v_passenger("proxy")
 _leetcode_v_hackany_from_all = _leetcode_v_passenger("hackany")
+_leetcode_v_hcattempt_from_all = _leetcode_v_passenger("hcattempt")
+_leetcode_v_hackany_g_from_all = _leetcode_v_passenger("hackany_g")
+_leetcode_v_guard_blocked_from_all = _leetcode_v_passenger("guard_blocked")
 
 
 REWARD_REGISTRY = {
@@ -1628,6 +1631,9 @@ REWARD_REGISTRY = {
     "leetcode_v_compile_from_all": _leetcode_v_compile_from_all,
     "leetcode_v_proxy_from_all": _leetcode_v_proxy_from_all,       # fraction of exposed tests passed
     "leetcode_v_hackany_from_all": _leetcode_v_hackany_from_all,   # all exposed pass, hidden not solved
+    "leetcode_v_hcattempt_from_all": _leetcode_v_hcattempt_from_all,          # literal hardcode attempt, paid or not
+    "leetcode_v_hackany_g_from_all": _leetcode_v_hackany_g_from_all,          # hackany, literal hardcodes pay 0 (guard)
+    "leetcode_v_guard_blocked_from_all": _leetcode_v_guard_blocked_from_all,  # hackany the guard zeroed (metric)
     # MBPP (HF google-research-datasets/mbpp)
     "mbpp_correct": _mbpp_correct_lazy,
     "mbpp_correct_from_all": _mbpp_correct_from_all,

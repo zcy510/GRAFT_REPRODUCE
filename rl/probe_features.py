@@ -150,10 +150,40 @@ def countdown_part_spans(completion):
     return sp
 
 
+LEETCODE_PARTS = ("all", "reasoning", "code", "text")
+
+
+def leetcode_part_spans(completion):
+    """Character spans of the parts of a LeetCode answer: reasoning (before the last </think>), code (the body of
+    the last ``` code block after it, the program the grader runs), text (the reply after </think> minus that
+    code block: explanations, plans), all. None = part absent. Without </think> everything counts as reasoning."""
+    import re
+    n = len(completion)
+    k = completion.rfind("</think>")
+    if k < 0:
+        return {"all": (0, n), "reasoning": (0, n), "code": None, "text": None}
+    a0 = k + len("</think>")
+    blocks = list(re.finditer(r"```[^\n`]*\n(.*?)```", completion[a0:], re.S))
+    code = (a0 + blocks[-1].start(1), a0 + blocks[-1].end(1)) if blocks else None
+    outer = (a0 + blocks[-1].start(), a0 + blocks[-1].end()) if blocks else None     # incl. the ``` fences
+    if code is None:
+        text = (a0, n) if a0 < n and completion[a0:].strip() else None
+    else:
+        before, after = completion[a0:outer[0]].strip(), completion[outer[1]:].strip()
+        text = (a0, n) if (before or after) else None          # the block itself is removed below (_code)
+    return {"all": (0, n), "reasoning": (0, k) if k > 0 else None, "code": code, "text": text, "_code": outer}
+
+
+def part_spans(completion, parts):
+    """Countdown or LeetCode part spans, chosen by the part names."""
+    return leetcode_part_spans(completion) if any(p in ("code", "text") for p in parts) else countdown_part_spans(completion)
+
+
 @torch.no_grad()
 def backbone_part_features(model, tok, prompts, completions, layers=(27,), parts=COUNTDOWN_PARTS, token_budget=32768,
                            device=None, log_every=0):
-    """Like backbone_hidden_features, but mean-pools each PART of the completion separately (countdown_part_spans;
+    """Like backbone_hidden_features, but mean-pools each PART of the completion separately (countdown_part_spans,
+    or leetcode_part_spans when the parts include code/text;
     a completion token belongs to a part if its character span overlaps it). Returns ({(layer, part): [N, hidden]
     float32, L2-normalised, zeros where the part is absent}, {part: [N] bool present}). Part "all" = all completion
     tokens = exactly backbone_hidden_features."""
@@ -167,7 +197,7 @@ def backbone_part_features(model, tok, prompts, completions, layers=(27,), parts
         c_ids, offs = enc.input_ids, enc.offset_mapping
         if not c_ids:
             c_ids, offs = [tok.eos_token_id], [(0, 0)]
-        sp = countdown_part_spans(c)
+        sp = part_spans(c, parts)
         pm = {}
         for part in parts:
             span = sp[part]
@@ -177,6 +207,9 @@ def backbone_part_features(model, tok, prompts, completions, layers=(27,), parts
                 pm[part] = np.ones(len(c_ids), bool)
             else:
                 pm[part] = np.array([(o[0] < span[1] and o[1] > span[0]) for o in offs], bool)
+                if part == "text" and sp.get("_code"):              # LeetCode text = reply minus the code block
+                    cb = sp["_code"]
+                    pm[part] &= ~np.array([(o[0] < cb[1] and o[1] > cb[0]) for o in offs], bool)
         seqs.append((p_ids + c_ids, len(p_ids))); pmasks.append(pm)
     order = sorted(range(len(seqs)), key=lambda i: len(seqs[i][0]))
     batches, cur = [], []
