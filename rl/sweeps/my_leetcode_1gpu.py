@@ -11,6 +11,8 @@ Environment variables:
   LC_SEEDS  comma list (default 9)       LC_STEPS  default 60
   LC_MODEL  default samuel500/graft-qwen3-8b-countdown-sft (the base of every Countdown arm)
   LC_MAXLEN max_completion_length override (default: the config's 3072)
+  LC_EXPOSED number of shown tests: 3 (default, leetcode_verified_exposed3) or 1 (leetcode_verified_exposed1;
+            the configs' reward / monitors are the same, the sweep's environment overrides theirs); 1 adds "_e1"
 GRAFT arms use the Countdown GRAFT recipe (sweeps/countdown_hf100_gr_lccoh64_lr3.py: lr 5e-4/3, 1:16 anchor
 slice), with the anchor moved to the HOLDOUT LeetCode problems (configs/leetcode_holdout_anchor.yaml).
 Run names: lc_<arm>_gh200x1_st<steps>_s<seed>[_g]"""
@@ -24,6 +26,8 @@ seeds = [int(s) for s in os.environ.get("LC_SEEDS", "9").split(",")]
 steps = int(os.environ.get("LC_STEPS", "60"))
 model = os.environ.get("LC_MODEL", "samuel500/graft-qwen3-8b-countdown-sft")
 guard = os.environ.get("LC_GUARD", "0") == "1"
+exposed = int(os.environ.get("LC_EXPOSED", "3"))
+assert exposed in (1, 3), exposed
 regime = "guard" if guard else "visible"
 cfg = lambda suffix="": f"configs/leetcode_exposed3_{regime}{suffix}.yaml"
 
@@ -41,7 +45,7 @@ for a in arms:
 
 HPC = {
     "model": model,
-    "environment": "leetcode_verified_exposed3",
+    "environment": f"leetcode_verified_exposed{exposed}",
     "leetcode_hint": "none",
     "vllm_gpu_memory": 0.55,
     "gradient_checkpointing": True,
@@ -58,7 +62,8 @@ runs = []
 for arm in arms:
     for s in seeds:
         r = {**ARMS[arm], **HPC, "seed": s}
-        r["run_name"] = f"lc_{arm}_gh200x1_st{steps}_s{s}" + ("_g" if guard else "")
+        r["run_name"] = (f"lc_{arm}_gh200x1_st{steps}_s{s}" + ("_g" if guard else "")
+                         + ("" if exposed == 3 else f"_e{exposed}"))
         runs.append(r)
 
 gpus_per_run = 1

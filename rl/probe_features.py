@@ -154,24 +154,20 @@ LEETCODE_PARTS = ("all", "reasoning", "code", "text")
 
 
 def leetcode_part_spans(completion):
-    """Character spans of the parts of a LeetCode answer: reasoning (before the last </think>), code (the body of
-    the last ``` code block after it, the program the grader runs), text (the reply after </think> minus that
-    code block: explanations, plans), all. None = part absent. Without </think> everything counts as reasoning."""
+    """Character spans of the parts of a LeetCode answer, around the LAST ``` code block (the program the grader
+    runs): reasoning = everything before that block (the hidden reasoning up to </think> when the model thinks,
+    plus the plan / explanation written before the code; cdsft mostly answers WITHOUT a think block on these
+    prompts: 86% of the pilot's eval answers), code = the block's body, text = what follows the block. No code
+    block -> everything is reasoning. None = part absent."""
     import re
     n = len(completion)
-    k = completion.rfind("</think>")
-    if k < 0:
-        return {"all": (0, n), "reasoning": (0, n), "code": None, "text": None}
-    a0 = k + len("</think>")
-    blocks = list(re.finditer(r"```[^\n`]*\n(.*?)```", completion[a0:], re.S))
-    code = (a0 + blocks[-1].start(1), a0 + blocks[-1].end(1)) if blocks else None
-    outer = (a0 + blocks[-1].start(), a0 + blocks[-1].end()) if blocks else None     # incl. the ``` fences
-    if code is None:
-        text = (a0, n) if a0 < n and completion[a0:].strip() else None
-    else:
-        before, after = completion[a0:outer[0]].strip(), completion[outer[1]:].strip()
-        text = (a0, n) if (before or after) else None          # the block itself is removed below (_code)
-    return {"all": (0, n), "reasoning": (0, k) if k > 0 else None, "code": code, "text": text, "_code": outer}
+    blocks = list(re.finditer(r"```[^\n`]*\n(.*?)```", completion, re.S))
+    if not blocks:
+        return {"all": (0, n), "reasoning": (0, n) if completion.strip() else None, "code": None, "text": None}
+    m = blocks[-1]
+    pre, post = completion[:m.start()], completion[m.end():]
+    return {"all": (0, n), "reasoning": (0, m.start()) if pre.strip() else None, "code": (m.start(1), m.end(1)),
+            "text": (m.end(), n) if post.strip() else None}
 
 
 def part_spans(completion, parts):
@@ -207,9 +203,7 @@ def backbone_part_features(model, tok, prompts, completions, layers=(27,), parts
                 pm[part] = np.ones(len(c_ids), bool)
             else:
                 pm[part] = np.array([(o[0] < span[1] and o[1] > span[0]) for o in offs], bool)
-                if part == "text" and sp.get("_code"):              # LeetCode text = reply minus the code block
-                    cb = sp["_code"]
-                    pm[part] &= ~np.array([(o[0] < cb[1] and o[1] > cb[0]) for o in offs], bool)
+
         seqs.append((p_ids + c_ids, len(p_ids))); pmasks.append(pm)
     order = sorted(range(len(seqs)), key=lambda i: len(seqs[i][0]))
     batches, cur = [], []
