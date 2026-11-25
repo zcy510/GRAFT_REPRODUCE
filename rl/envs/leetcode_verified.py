@@ -266,7 +266,9 @@ def _literal_values(tree):
         elif isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict)):
             try:
                 vals.append(ast.literal_eval(node))
-            except (ValueError, SyntaxError):
+            except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+                # TypeError: a set/dict literal with unhashable members, e.g. {[1, 2]} or {{}: 1} --
+                # valid syntax, but literal_eval raises building it (crashed lc_gr s15/s16, 2026-11-25)
                 pass
     return vals
 
@@ -374,7 +376,11 @@ def leetcode_v_all_components(completions, gt_answer, setup_code,
         att = False
         if exp and full < 1.0:
             prog = _extract_program(completions[i])
-            att = any(_exposed_hardcode(prog, a) for a, _ in exp)
+            try:
+                att = any(_exposed_hardcode(prog, a) for a, _ in exp)
+            except Exception as e:                       # never let a metric crash a training run
+                print(f"[leetcode_verified] hcattempt check failed ({e.__class__.__name__}: {e}); counted as 0")
+                att = False
         hcattempt.append(float(att))
         hackany_g.append(float(ha and not att))
         guard_blocked.append(float(ha and att))
